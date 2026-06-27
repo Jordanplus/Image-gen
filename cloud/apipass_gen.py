@@ -22,6 +22,17 @@ import time
 import urllib.error
 import urllib.request
 
+# 金鑰自動載入：先讀 cwd 的 .env，再讀集中式 apipass.env（與 generate_image.py 一致，
+# 讓本 adapter 單獨執行時也能用「apipass 環境」，無需手動 export APIPASS_API_KEY）。
+APIPASS_ENV = "/Users/mcgradymac/claude_prjs/apipass.env"
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    if os.path.exists(APIPASS_ENV):
+        load_dotenv(APIPASS_ENV)
+except ImportError:
+    pass
+
 API_BASE = "https://api.apipass.dev"
 CREATE_PATH = "/api/v1/jobs/createTask"
 RECORD_PATH = "/api/v1/jobs/recordInfo"

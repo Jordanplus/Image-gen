@@ -23,6 +23,13 @@ models/
 characters/
 refs/
 
+# 線上路線 cloud/ 的個人照片 / 生成圖（私人，勿推公開 repo；程式碼仍進版控）
+cloud/*.jpg
+cloud/*.jpeg
+cloud/*.png
+cloud/*.webp
+cloud/ab_out/
+
 # ============================================================
 #  Personal NSFW working files — keep local, do not publish
 # ============================================================
