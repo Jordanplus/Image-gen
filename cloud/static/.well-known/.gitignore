@@ -1,0 +1,3 @@
+# 真正的 assetlinks.json 由你依自己的簽章指紋產生；只保留範本進 git
+assetlinks.json
+!assetlinks.json.example

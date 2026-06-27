@@ -1,0 +1,18 @@
+{
+  "_comment": "Bubblewrap TWA 設定範本。把 REPLACE_DOMAIN 換成你的穩定 HTTPS 網域（不含結尾斜線），複製成 apk/twa-manifest.json 後跑 build.sh。",
+  "packageId": "dev.imagegen.twa",
+  "host": "REPLACE_DOMAIN",
+  "name": "ImageGen",
+  "launcherName": "ImageGen",
+  "display": "standalone",
+  "themeColor": "#0b1020",
+  "navigationColor": "#0b1020",
+  "backgroundColor": "#0b1020",
+  "startUrl": "/",
+  "iconUrl": "https://REPLACE_DOMAIN/icons/icon-512.png",
+  "maskableIconUrl": "https://REPLACE_DOMAIN/icons/icon-512-maskable.png",
+  "webManifestUrl": "https://REPLACE_DOMAIN/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "orientation": "portrait",
+  "enableNotifications": false
+}

@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from apipass_gen import generate_apipass
@@ -63,6 +63,15 @@ def claude_write_prompt(intent: str, ref_paths: list) -> str:
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+
+@app.get("/.well-known/assetlinks.json")
+def assetlinks():
+    """Digital Asset Links — TWA(APK) 全螢幕驗證用。填好 static/.well-known/assetlinks.json 後生效。"""
+    p = HERE / "static" / ".well-known" / "assetlinks.json"
+    if p.exists():
+        return Response(p.read_text(), media_type="application/json")
+    return JSONResponse({"error": "assetlinks not configured"}, status_code=404)
 
 
 @app.post("/generate")
