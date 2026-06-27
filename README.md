@@ -19,6 +19,7 @@ image-gen/
 │  └─ legacy/                舊版存查（my_imagen.py）
 ├─ workflows/       ComfyUI workflow JSON（現役 face_fix；legacy/ 放舊版與孤兒）
 ├─ recipes/         獨立生成腳本（flux2_resident、gen_photo_v2、transform_v3…）
+├─ cloud/           ☁️ 線上備援路線（apipass.dev：GPT-image-2 / Nano Banana，見 cloud/README.md）
 ├─ docs/            文件（METHODS / LOCAL-MODELS）
 ├─ README.md  toolchain.md  plan.md  status.md
 ├─ setup.sh  start_backend.sh  download_model.sh

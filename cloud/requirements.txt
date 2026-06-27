@@ -1,0 +1,8 @@
+# 線上 apipass 路線（GPT-image-2 / Nano Banana）依賴
+# apipass 後端本身只需標準庫 + 以下兩者；系統 python3 通常已具備。
+pillow
+python-dotenv
+
+# 直連官方 SDK（選用，僅 *-direct 後端需要）：
+# openai            # openai-direct（gpt-image-2 直連）
+# google-genai      # gemini-direct（Nano Banana 直連）
