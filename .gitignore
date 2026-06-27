@@ -1,0 +1,44 @@
+# ============================================================
+#  Secrets — NEVER commit
+# ============================================================
+humming
+*.env
+.env
+.dev.vars
+
+# ============================================================
+#  Environments / third-party (huge, not our code)
+# ============================================================
+ComfyUI/
+venv/
+.venv-face/
+.venv-mlx/
+.claude/
+
+# ============================================================
+#  Generated output & large / personal binary assets
+# ============================================================
+outputs/
+models/
+characters/
+refs/
+
+# ============================================================
+#  Personal NSFW working files — keep local, do not publish
+# ============================================================
+prompts/
+runners/
+docs/test.md
+docs/video.md
+docs/*.html
+scripts/legacy/my_ai_2026.py
+
+# ============================================================
+#  OS / Python junk
+# ============================================================
+.DS_Store
+**/.DS_Store
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
