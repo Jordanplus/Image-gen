@@ -1,0 +1,4 @@
+# app 後端本機產物（勿進 git）
+.venv/
+.app_token
+__pycache__/
