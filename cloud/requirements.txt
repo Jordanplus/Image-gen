@@ -3,6 +3,11 @@
 pillow
 python-dotenv
 
+# 手機 app 後端（cloud/server.py；見 PHONE-APP.md）：
+# fastapi
+# uvicorn[standard]
+# python-multipart
+
 # 直連官方 SDK（選用，僅 *-direct 後端需要）：
 # openai            # openai-direct（gpt-image-2 直連）
 # google-genai      # gemini-direct（Nano Banana 直連）

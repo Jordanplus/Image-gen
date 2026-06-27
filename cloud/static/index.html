@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>ImageGen</title>
+<style>
+  :root { --bg:#0b1020; --card:#161c2e; --fg:#e8ecf6; --mut:#8a94ad; --acc:#6aa6ff; --line:#27304a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 -apple-system,system-ui,"Noto Sans TC",sans-serif;
+         padding:env(safe-area-inset-top) 14px calc(env(safe-area-inset-bottom) + 14px); }
+  h1 { font-size:18px; margin:14px 2px 12px; }
+  h1 span { color:var(--mut); font-weight:400; font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+  textarea, select, input[type=text] { width:100%; background:#0e1422; color:var(--fg); border:1px solid var(--line);
+         border-radius:10px; padding:11px; font-size:16px; }
+  textarea { min-height:84px; resize:vertical; }
+  .row { display:flex; gap:8px; } .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:12px; color:var(--fg); font-size:14px; }
+  .chk input { width:20px; height:20px; }
+  button { width:100%; margin-top:14px; background:var(--acc); color:#04122e; border:0; border-radius:12px;
+           padding:14px; font-size:17px; font-weight:600; }
+  button:disabled { opacity:.5; }
+  #thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  #thumbs img { width:64px; height:64px; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+  #status { color:var(--mut); font-size:14px; min-height:20px; margin-top:8px; }
+  #prompt { white-space:pre-wrap; font-size:13px; color:var(--mut); background:#0e1422; border:1px solid var(--line);
+            border-radius:10px; padding:10px; margin-top:8px; display:none; }
+  #result { width:100%; border-radius:12px; margin-top:10px; display:none; }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--mut); border-top-color:var(--acc);
+          border-radius:50%; animation:s .8s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes s { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+  <h1>🎨 ImageGen <span>· apipass gpt-image-2</span></h1>
+
+  <div class="card">
+    <label>想生什麼？（用中文/口語描述意圖即可，Claude 會幫你寫 prompt）</label>
+    <textarea id="intent" placeholder="例：黃昏的台北101復古旅遊海報，標題寫 TAIPEI"></textarea>
+
+    <label>參考圖（選填，最多 5 張 · 鎖風格/角色）</label>
+    <input id="files" type="file" accept="image/*" multiple>
+    <div id="thumbs"></div>
+
+    <div class="row">
+      <div>
+        <label>模型</label>
+        <select id="model">
+          <option value="openai/gpt-image-2">gpt-image-2</option>
+          <option value="google/nano-banana-pro">nano-banana-pro</option>
+        </select>
+      </div>
+      <div>
+        <label>比例</label>
+        <select id="aspect">
+          <option>1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option>
+        </select>
+      </div>
+      <div>
+        <label>解析度</label>
+        <select id="resolution">
+          <option value="">預設</option><option>1K</option><option>2K</option><option>4K</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="chk"><input id="writep" type="checkbox" checked> 讓 Claude 幫我寫 prompt（取消＝直接用上面文字）</label>
+
+    <button id="go">生成</button>
+    <div id="status"></div>
+    <div id="prompt"></div>
+    <img id="result" alt="result">
+  </div>
+
+<script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+const $ = id => document.getElementById(id);
+const thumbs = $('thumbs');
+$('files').addEventListener('change', () => {
+  thumbs.innerHTML = '';
+  [...$('files').files].slice(0,5).forEach(f => {
+    const img = document.createElement('img'); img.src = URL.createObjectURL(f); thumbs.appendChild(img);
+  });
+});
+$('go').addEventListener('click', async () => {
+  const intent = $('intent').value.trim();
+  if (!intent) { $('status').textContent = '⚠️ 先輸入想生什麼'; return; }
+  const fd = new FormData();
+  fd.append('intent', intent);
+  fd.append('model', $('model').value);
+  fd.append('aspect', $('aspect').value);
+  fd.append('resolution', $('resolution').value);
+  fd.append('write_prompt', $('writep').checked ? 'true' : 'false');
+  [...$('files').files].slice(0,5).forEach(f => fd.append('refs', f));
+
+  $('go').disabled = true; $('result').style.display='none'; $('prompt').style.display='none';
+  $('status').innerHTML = '<span class="spin"></span>生成中…（寫 prompt + 生圖，約 10–60 秒）';
+  const post = () => fetch('/generate', { method:'POST', body:fd,
+    headers: { 'X-App-Token': localStorage.getItem('app_token') || '' } });
+  try {
+    let r = await post();
+    if (r.status === 401) {                       // 後端有設 APP_TOKEN（如公開的 Cloudflare 路線）
+      const t = prompt('需要存取 token：'); if (t) { localStorage.setItem('app_token', t); r = await post(); }
+    }
+    const j = await r.json();
+    if (j.prompt) { $('prompt').textContent = '📝 ' + j.prompt; $('prompt').style.display='block'; }
+    if (j.ok) {
+      $('status').textContent = '✅ 完成';
+      $('result').src = j.image_url + '?t=' + Date.now(); $('result').style.display='block';
+    } else {
+      $('status').textContent = '❌ ' + (j.error || '失敗') + (j.stage ? ' ('+j.stage+')' : '');
+    }
+  } catch (e) {
+    $('status').textContent = '❌ 連線失敗：' + e.message;
+  } finally { $('go').disabled = false; }
+});
+</script>
+</body>
+</html>
