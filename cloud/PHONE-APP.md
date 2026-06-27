@@ -41,7 +41,8 @@ uvicorn server:app --host 0.0.0.0 --port 8765
 3. Chrome 選單 →「加到主畫面」→ 像原生 app。
 - **唯一要求**：手機 Tailscale 保持連線（VPN 狀態）。私有、零公開曝險，**不需 `APP_TOKEN`**。
 
-### 方案 B：Cloudflare Tunnel（手機免裝 VPN · 給你公開 HTTPS 網址）
+### 方案 B：公開 HTTPS 網址（手機免裝 VPN；包 APK 也用這個）
+> 已用 Tailscale 的話最省事：`tailscale funnel --bg 8765` 直接給你固定公開網址 `https://<機器>.<tailnet>.ts.net`（免買網域，見 `apk/README.md`）。以下是 Cloudflare 版：
 ```bash
 brew install cloudflared
 cloudflared tunnel --url http://localhost:8765     # 快速：吐一個 https://xxx.trycloudflare.com

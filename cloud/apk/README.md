@@ -2,16 +2,30 @@
 
 底層仍是 `cloud/static/` 那個 PWA，用 **TWA（Trusted Web Activity）** 包成 Android `.apk`/`.aab`，**零原生程式碼**。
 
-## 🔑 唯一硬前提：一個「穩定」公開 HTTPS 網域
+## 🔑 唯一硬前提：一個「穩定」公開 HTTPS 網址
 TWA 會把網址烤進 APK，且要靠 Digital Asset Links 驗證 → **不能用每次變動的臨時 tunnel**。
-- 最簡：在 **Cloudflare** 放一個你擁有的網域 → 建 **named tunnel** 指到 Mac Mini 的 `:8765`：
-  ```bash
-  cloudflared tunnel login
-  cloudflared tunnel create imagegen
-  cloudflared tunnel route dns imagegen img.你的網域
-  cloudflared tunnel run --url http://localhost:8765 imagegen   # 之後可做成 launchd 常駐
-  ```
-  得到穩定的 `https://img.你的網域`。（公開曝露 → 後端記得 `export APP_TOKEN=...`）
+
+### 方式 A：Tailscale Funnel（推薦 · 免買網域）
+你既有的 Tailscale 就能給一個**固定的公開 HTTPS 網址** `https://<mac-mini>.<tailnet>.ts.net`：
+1. Tailscale 管理後台啟用 **HTTPS 憑證**（MagicDNS + HTTPS Certificates）與 **Funnel**（Access Controls 給該機 `funnel` nodeAttr）。
+2. 後端跑著（:8765），然後：
+   ```bash
+   tailscale funnel --bg 8765        # 公開 443 → localhost:8765；--bg = 背景常駐
+   tailscale funnel status           # 確認公開網址
+   ```
+3. 公開網址 = `https://<mac-mini>.<tailnet>.ts.net`（Funnel 公開側僅 443/8443/10000，預設 443）。
+> Funnel = 公開可達 → **務必 `export APP_TOKEN=...`**（見 ../PHONE-APP.md），否則 apipass/訂閱會被盜用。
+
+### 方式 B：Cloudflare named tunnel（你已擁有自己的網域時）
+```bash
+cloudflared tunnel login
+cloudflared tunnel create imagegen
+cloudflared tunnel route dns imagegen img.你的網域
+cloudflared tunnel run --url http://localhost:8765 imagegen   # 可做成 launchd 常駐
+```
+得到 `https://img.你的網域`。（同樣公開 → 設 `APP_TOKEN`）
+
+> 下面 `https://<你的網址>` 兩條路線通用，填方式 A 的 `.ts.net` 或方式 B 的自有網域皆可。
 
 ---
 
