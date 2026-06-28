@@ -50,5 +50,7 @@ __pycache__/
 *.pyc
 *.pyo
 
-# 個人照片（app 圖示來源；勿進公開 repo）
+# 個人照片／截圖（app 圖示來源、測試截圖；勿進公開 repo）
 54769378920_400d82b583_k.jpg
+Screenshot_*.jpg
+Screenshot_*.png
