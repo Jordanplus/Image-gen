@@ -1,7 +1,7 @@
 // 最小 service worker：讓 PWA 可安裝（獨立視窗/圖示）+ app shell 離線可開。
 // 注意：Service Worker 只在安全來源（HTTPS 或 localhost）註冊；
 // Tailscale 純 http IP 不算安全來源 → 用 Funnel/`tailscale serve` 或 Cloudflare Tunnel 提供 HTTPS。
-const CACHE = 'imagegen-v2';
+const CACHE = 'imagegen-v3';  // v3: 加「本地 4B·免額度」模型選項
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest'])));

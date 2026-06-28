@@ -44,6 +44,8 @@ stop() {
   # 只停後端 uvicorn；Funnel 留著（指向死 port 只會回 502，不曝露任何東西，且重開機自動還原）
   local p; p="$(pid_on_port)"
   [ -n "$p" ] && /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null
+  # 也關掉本地 klein worker（若在跑）→ 釋放 ~7-8GB RAM
+  /usr/bin/pkill -f "klein_worker.py" 2>/dev/null
 }
 
 status() {
@@ -55,6 +57,11 @@ status() {
     echo "🔴 服務未啟動"
   fi
   if funnel_on; then echo "Funnel: 🟢 公開中"; else echo "Funnel: 🔴 未開"; fi
+  if /usr/bin/pgrep -f "klein_worker.py" >/dev/null 2>&1; then
+    echo "本地4B: 🟢 已載入(閒置 10 分自動卸載)"
+  else
+    echo "本地4B: ⚪️ 未載入(手機選本地時才啟動)"
+  fi
   echo "網址　: $URL"
   echo "Token : $(cat "$TOKFILE" 2>/dev/null)"
 }

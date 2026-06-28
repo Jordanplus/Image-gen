@@ -17,6 +17,8 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -29,6 +31,65 @@ from apipass_gen import generate_apipass
 HERE = Path(__file__).resolve().parent
 OUT_DIR = Path(tempfile.gettempdir()) / "imagegen_out"
 OUT_DIR.mkdir(exist_ok=True)
+
+# ── 本地模型（FLUX.2 klein-4B，跑在這台 24GB Mac Mini）────────────────────────
+# 由 klein_worker.py 承載：隨需啟動、閒置 10 分自動結束釋放 RAM（見該檔說明）。
+# worker 用 mflux 的 venv 跑（與 server 的 .venv 隔離），server 只透過本機 HTTP 溝通。
+MFLUX_PY = os.path.expanduser("~/.local/share/uv/tools/mflux/bin/python")
+KLEIN_WORKER = str(HERE / "klein_worker.py")
+KLEIN_PORT = int(os.environ.get("KLEIN_PORT", "8770"))
+KLEIN_URL = f"http://127.0.0.1:{KLEIN_PORT}"
+KLEIN_IDLE = os.environ.get("KLEIN_IDLE", "600")  # 閒置幾秒後 worker 自我結束
+LOCAL_MODELS = {"local/flux2-klein-4b"}           # 手機下拉用這個 value 走本地
+
+_worker_proc = None
+_worker_lock = threading.Lock()
+
+
+def _klein_health():
+    """worker 活著就回它的狀態 dict，否則 None。"""
+    try:
+        with urllib.request.urlopen(f"{KLEIN_URL}/health", timeout=2) as r:
+            return json.loads(r.read())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def ensure_klein_worker():
+    """確保本地 worker 在跑；沒在跑就用 mflux venv 把它拉起並等到 ready。"""
+    global _worker_proc
+    if _klein_health():
+        return
+    with _worker_lock:
+        if _klein_health():
+            return
+        env = dict(os.environ)
+        env.pop("ANTHROPIC_API_KEY", None)
+        env["KLEIN_PORT"] = str(KLEIN_PORT)
+        env["KLEIN_OUT"] = str(OUT_DIR)
+        env["KLEIN_IDLE"] = str(KLEIN_IDLE)
+        env["HF_HUB_DISABLE_XET"] = "1"   # 抓模型時避開 Xet 空轉（已快取則無影響）
+        logf = open("/tmp/klein_worker.log", "a")  # noqa: SIM115
+        _worker_proc = subprocess.Popen([MFLUX_PY, KLEIN_WORKER],
+                                        stdout=logf, stderr=subprocess.STDOUT, env=env)
+        for _ in range(60):               # 等 worker 開始 listen（最多 ~30s）
+            if _klein_health():
+                return
+            time.sleep(0.5)
+        raise RuntimeError("本地 klein worker 啟動逾時（看 /tmp/klein_worker.log）")
+
+
+def _wh_from_aspect(aspect: str, long_edge: int = 1024):
+    """把比例字串(如 16:9)換成 width,height；長邊固定 long_edge，對齊 16 的倍數。"""
+    try:
+        a, b = (int(x) for x in aspect.split(":"))
+    except Exception:  # noqa: BLE001
+        a, b = 1, 1
+    if a >= b:
+        w, h = long_edge, round(long_edge * b / a / 16) * 16
+    else:
+        w, h = round(long_edge * a / b / 16) * 16, long_edge
+    return max(256, w), max(256, h)
 
 # 選用鑑權：設了 APP_TOKEN 才要求（公開曝露如 Cloudflare Tunnel 必設；Tailscale 純自用可不設）。
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
@@ -127,6 +188,49 @@ def generate(
             yield ev({"stage": "error", "where": "prompt", "error": str(e)})
             return
         yield ev({"stage": "prompt", "prompt": prompt})
+
+        # 2.5) 本地模型分支（FLUX.2 klein-4B）：隨需拉起 worker → 本機生圖 → 同樣心跳保活。
+        #      免 apipass 額度；第一次會等 worker 啟動+載入模型（較久），之後常駐重用。
+        if model in LOCAL_MODELS:
+            yield ev({"stage": "generating"})
+            try:
+                ensure_klein_worker()
+            except Exception as e:  # noqa: BLE001
+                yield ev({"stage": "error", "where": "local_worker", "prompt": prompt, "error": str(e)})
+                return
+            w, h = _wh_from_aspect(aspect or "1:1", 1024)
+            out_name = f"out_{uuid.uuid4().hex}.png"
+            lbox = {}
+
+            def _work_local():
+                try:
+                    payload = json.dumps({"prompt": prompt, "width": w, "height": h,
+                                          "steps": 6, "guidance": 1.0, "out_name": out_name}).encode()
+                    rq = urllib.request.Request(f"{KLEIN_URL}/generate", data=payload,
+                                                headers={"Content-Type": "application/json"})
+                    with urllib.request.urlopen(rq, timeout=900) as r:
+                        lbox["result"] = json.loads(r.read())
+                except Exception as e:  # noqa: BLE001
+                    lbox["error"] = str(e)
+
+            lt = threading.Thread(target=_work_local, daemon=True)
+            lt.start()
+            waited = 0
+            while lt.is_alive():
+                lt.join(timeout=4)
+                if lt.is_alive():
+                    waited += 4
+                    yield ev({"stage": "progress", "waited": waited})
+            if lbox.get("error"):
+                yield ev({"stage": "error", "where": "generate", "prompt": prompt, "error": lbox["error"]})
+                return
+            res = lbox.get("result") or {}
+            if not res.get("ok"):
+                yield ev({"stage": "error", "where": "generate", "prompt": prompt,
+                          "error": res.get("error", "本地生圖失敗")})
+                return
+            yield ev({"stage": "done", "ok": True, "prompt": prompt, "image_url": f"/img/{res['filename']}"})
+            return
 
         # 3) apipass 生圖：在背景執行緒跑，等待期間每 4s 送「心跳」事件。
         #    apipass 排隊可能靜默數十秒～數分鐘；不送資料的話 Funnel/行動網路會把閒置連線斷掉
