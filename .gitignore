@@ -49,3 +49,6 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+
+# 個人照片（app 圖示來源；勿進公開 repo）
+54769378920_400d82b583_k.jpg

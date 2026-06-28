@@ -1,15 +1,5 @@
-# Bubblewrap / TWA 產出物 — 絕不進 git（keystore 遺失＝無法再更新同一 app）
-twa-manifest.json
-*.keystore
-*.jks
+twa/
+gen-twa.js
 *.apk
 *.aab
-node_modules/
-# Bubblewrap 產生的 Android 專案檔
-app/
-build/
-.gradle/
-gradle/
-gradlew
-gradlew.bat
-store_icon.png
+*.keystore

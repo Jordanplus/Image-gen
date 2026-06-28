@@ -33,6 +33,11 @@
   .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--mut); border-top-color:var(--acc);
           border-radius:50%; animation:s .8s linear infinite; vertical-align:-2px; margin-right:6px; }
   @keyframes s { to { transform:rotate(360deg); } }
+  #bar { height:6px; border-radius:6px; background:#0e1422; border:1px solid var(--line);
+         overflow:hidden; margin-top:10px; display:none; }
+  #bar::before { content:''; display:block; height:100%; width:38%; background:var(--acc);
+         border-radius:6px; animation:slide 1.15s ease-in-out infinite; }
+  @keyframes slide { 0% { transform:translateX(-110%); } 100% { transform:translateX(300%); } }
 </style>
 </head>
 <body>
@@ -70,7 +75,15 @@
 
     <label class="chk"><input id="writep" type="checkbox" checked> 讓 Claude 幫我寫 prompt（取消＝直接用上面文字）</label>
 
+    <label>寫 prompt 的模型（丟參考圖時 Haiku 會自動升 Sonnet）</label>
+    <select id="pmodel">
+      <option value="haiku">Haiku · 最省額度</option>
+      <option value="sonnet" selected>Sonnet · 推薦（品質≈Opus）</option>
+      <option value="opus">Opus · 最強最細（燒額度快）</option>
+    </select>
+
     <button id="go">生成</button>
+    <div id="bar"></div>
     <div id="status"></div>
     <div id="prompt"></div>
     <img id="result" alt="result">
@@ -86,6 +99,7 @@ $('files').addEventListener('change', () => {
     const img = document.createElement('img'); img.src = URL.createObjectURL(f); thumbs.appendChild(img);
   });
 });
+$('writep').addEventListener('change', () => { $('pmodel').disabled = !$('writep').checked; });
 $('go').addEventListener('click', async () => {
   const intent = $('intent').value.trim();
   if (!intent) { $('status').textContent = '⚠️ 先輸入想生什麼'; return; }
@@ -95,27 +109,58 @@ $('go').addEventListener('click', async () => {
   fd.append('aspect', $('aspect').value);
   fd.append('resolution', $('resolution').value);
   fd.append('write_prompt', $('writep').checked ? 'true' : 'false');
+  fd.append('prompt_model', $('pmodel').value);
   [...$('files').files].slice(0,5).forEach(f => fd.append('refs', f));
 
   $('go').disabled = true; $('result').style.display='none'; $('prompt').style.display='none';
-  $('status').innerHTML = '<span class="spin"></span>生成中…（寫 prompt + 生圖，約 10–60 秒）';
+  $('bar').style.display='block';
   const post = () => fetch('/generate', { method:'POST', body:fd,
     headers: { 'X-App-Token': localStorage.getItem('app_token') || '' } });
+
+  // 跳動的階段訊息 + 秒數（就算串流被緩衝，計時器照跳，不會像當機）
+  const t0 = Date.now();
+  let stageMsg = $('writep').checked ? '✍️ Claude 正在寫 prompt…' : '🎨 生圖中…';
+  const render = () => { $('status').innerHTML =
+    '<span class="spin"></span>' + stageMsg + '（已 ' + Math.round((Date.now()-t0)/1000) + ' 秒）'; };
+  const timer = setInterval(render, 500); render();
+  const stop = () => { clearInterval(timer); $('bar').style.display='none'; };
+
+  const onEvent = (ev) => {
+    if (ev.stage === 'prompt') {
+      if (ev.prompt) { $('prompt').textContent = '📝 ' + ev.prompt; $('prompt').style.display='block'; }
+      stageMsg = '🎨 生圖中…（apipass，通常還要 20–50 秒）';
+    } else if (ev.stage === 'generating') {
+      stageMsg = '🎨 生圖中…（apipass，通常還要 20–50 秒）';
+    } else if (ev.stage === 'done') {
+      stop();
+      $('status').textContent = '✅ 完成（用了 ' + Math.round((Date.now()-t0)/1000) + ' 秒）';
+      $('result').src = ev.image_url + '?t=' + Date.now(); $('result').style.display='block';
+    } else if (ev.stage === 'error') {
+      stop();
+      $('status').textContent = '❌ ' + (ev.error || '失敗') + (ev.where ? ' ('+ev.where+')' : '');
+    }
+  };
+
   try {
     let r = await post();
-    if (r.status === 401) {                       // 後端有設 APP_TOKEN（如公開的 Cloudflare 路線）
+    if (r.status === 401) {                       // 後端有設 APP_TOKEN（公開路線）
       const t = prompt('需要存取 token：'); if (t) { localStorage.setItem('app_token', t); r = await post(); }
     }
-    const j = await r.json();
-    if (j.prompt) { $('prompt').textContent = '📝 ' + j.prompt; $('prompt').style.display='block'; }
-    if (j.ok) {
-      $('status').textContent = '✅ 完成';
-      $('result').src = j.image_url + '?t=' + Date.now(); $('result').style.display='block';
-    } else {
-      $('status').textContent = '❌ ' + (j.error || '失敗') + (j.stage ? ' ('+j.stage+')' : '');
+    if (r.status === 401) { stop(); $('status').textContent = '❌ token 不正確'; return; }
+    if (!r.ok || !r.body) { stop(); $('status').textContent = '❌ HTTP ' + r.status; return; }
+    // 讀 NDJSON 串流：每行一個事件
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let nl; while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (line) { try { onEvent(JSON.parse(line)); } catch (_) {} }
+      }
     }
+    if (buf.trim()) { try { onEvent(JSON.parse(buf.trim())); } catch (_) {} }
   } catch (e) {
-    $('status').textContent = '❌ 連線失敗：' + e.message;
+    stop(); $('status').textContent = '❌ 連線失敗：' + e.message;
   } finally { $('go').disabled = false; }
 });
 </script>
