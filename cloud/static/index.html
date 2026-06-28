@@ -30,6 +30,11 @@
   #prompt { white-space:pre-wrap; font-size:13px; color:var(--mut); background:#0e1422; border:1px solid var(--line);
             border-radius:10px; padding:10px; margin-top:8px; display:none; }
   #result { width:100%; border-radius:12px; margin-top:10px; display:none; }
+  #actions { display:none; gap:8px; margin-top:10px; }
+  #actions.show { display:flex; }
+  #actions a, #actions button { flex:1; margin:0; width:auto; text-align:center; text-decoration:none;
+    background:#1b2336; color:var(--fg); border:1px solid var(--line); border-radius:12px;
+    padding:13px; font-size:16px; font-weight:600; }
   .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--mut); border-top-color:var(--acc);
           border-radius:50%; animation:s .8s linear infinite; vertical-align:-2px; margin-right:6px; }
   @keyframes s { to { transform:rotate(360deg); } }
@@ -87,6 +92,10 @@
     <div id="status"></div>
     <div id="prompt"></div>
     <img id="result" alt="result">
+    <div id="actions">
+      <a id="dl">📥 下載原檔</a>
+      <button id="share">🔗 分享／存相簿</button>
+    </div>
   </div>
 
 <script>
@@ -100,6 +109,18 @@ $('files').addEventListener('change', () => {
   });
 });
 $('writep').addEventListener('change', () => { $('pmodel').disabled = !$('writep').checked; });
+
+let lastImg = '';
+$('share').addEventListener('click', async () => {
+  if (!lastImg) return;
+  try {
+    const blob = await (await fetch(lastImg)).blob();
+    const file = new File([blob], 'imagegen.png', { type: blob.type || 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'ImageGen' });
+    } else { $('dl').click(); }   // 不支援分享 → 退回下載
+  } catch (e) { /* 使用者取消或不支援，忽略 */ }
+});
 $('go').addEventListener('click', async () => {
   const intent = $('intent').value.trim();
   if (!intent) { $('status').textContent = '⚠️ 先輸入想生什麼'; return; }
@@ -113,7 +134,7 @@ $('go').addEventListener('click', async () => {
   [...$('files').files].slice(0,5).forEach(f => fd.append('refs', f));
 
   $('go').disabled = true; $('result').style.display='none'; $('prompt').style.display='none';
-  $('bar').style.display='block';
+  $('bar').style.display='block'; $('actions').classList.remove('show');
   const post = () => fetch('/generate', { method:'POST', body:fd,
     headers: { 'X-App-Token': localStorage.getItem('app_token') || '' } });
 
@@ -136,7 +157,10 @@ $('go').addEventListener('click', async () => {
     } else if (ev.stage === 'done') {
       stop();
       $('status').textContent = '✅ 完成（用了 ' + Math.round((Date.now()-t0)/1000) + ' 秒）';
+      lastImg = ev.image_url;
       $('result').src = ev.image_url + '?t=' + Date.now(); $('result').style.display='block';
+      $('dl').href = ev.image_url; $('dl').setAttribute('download', 'imagegen_' + Date.now() + '.png');
+      $('actions').classList.add('show');
     } else if (ev.stage === 'error') {
       stop();
       $('status').textContent = '❌ ' + (ev.error || '失敗') + (ev.where ? ' ('+ev.where+')' : '');
