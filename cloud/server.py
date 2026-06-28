@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 
@@ -127,20 +128,36 @@ def generate(
             return
         yield ev({"stage": "prompt", "prompt": prompt})
 
-        # 3) apipass 生圖（沿用既有 adapter；quality 僅 gpt-image 系列吃）
+        # 3) apipass 生圖：在背景執行緒跑，等待期間每 4s 送「心跳」事件。
+        #    apipass 排隊可能靜默數十秒～數分鐘；不送資料的話 Funnel/行動網路會把閒置連線斷掉
+        #    → 手機看到 "Failed to fetch"。心跳讓連線持續有 bytes 流動。
         yield ev({"stage": "generating"})
         out_name = f"out_{uuid.uuid4().hex}.png"
         quality = "high" if model.startswith("openai/") else None
-        try:
-            result = generate_apipass(
-                prompt, str(OUT_DIR / out_name), aspect_ratio=(aspect or "1:1"),
-                resolution=(resolution or None), quality=quality,
-                images=(ref_paths or None), model=model,
-            )
-        except Exception as e:
-            yield ev({"stage": "error", "where": "generate", "prompt": prompt, "error": str(e)})
+        box = {}
+
+        def _work():
+            try:
+                box["result"] = generate_apipass(
+                    prompt, str(OUT_DIR / out_name), aspect_ratio=(aspect or "1:1"),
+                    resolution=(resolution or None), quality=quality,
+                    images=(ref_paths or None), model=model,
+                )
+            except Exception as e:  # noqa: BLE001
+                box["error"] = str(e)
+
+        t = threading.Thread(target=_work, daemon=True)
+        t.start()
+        waited = 0
+        while t.is_alive():
+            t.join(timeout=4)
+            if t.is_alive():
+                waited += 4
+                yield ev({"stage": "progress", "waited": waited})  # 心跳：保活
+        if box.get("error"):
+            yield ev({"stage": "error", "where": "generate", "prompt": prompt, "error": box["error"]})
             return
-        if not result:
+        if not box.get("result"):
             yield ev({"stage": "error", "where": "generate", "prompt": prompt,
                       "error": "apipass 生圖失敗（看後端 log）"})
             return

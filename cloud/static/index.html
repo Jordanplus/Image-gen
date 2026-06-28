@@ -131,6 +131,8 @@ $('go').addEventListener('click', async () => {
       stageMsg = '🎨 生圖中…（apipass，通常還要 20–50 秒）';
     } else if (ev.stage === 'generating') {
       stageMsg = '🎨 生圖中…（apipass，通常還要 20–50 秒）';
+    } else if (ev.stage === 'progress') {
+      stageMsg = '🎨 生圖中…（apipass 處理中，伺服器已等 ' + (ev.waited || 0) + ' 秒）';
     } else if (ev.stage === 'done') {
       stop();
       $('status').textContent = '✅ 完成（用了 ' + Math.round((Date.now()-t0)/1000) + ' 秒）';
