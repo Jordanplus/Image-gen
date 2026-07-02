@@ -1,4 +1,5 @@
 # app 後端本機產物（勿進 git）
 .venv/
 .app_token
+.claude_oauth_token
 __pycache__/

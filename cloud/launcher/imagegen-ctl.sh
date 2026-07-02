@@ -8,6 +8,9 @@ REPO="/Users/mcgradymac/claude_prjs/Image-gen/cloud"
 PORT=8765
 VENV="$REPO/.venv"
 TOKFILE="$REPO/.app_token"
+# claude 訂閱 OAuth token（`claude setup-token` 產）。設了→claude -p 免碰 Keychain，
+# 背景服務(不在互動登入 session)才讀得到訂閱憑證，「Claude 幫寫 prompt」才會生效。
+CCTOKFILE="$REPO/.claude_oauth_token"
 LOG="/tmp/imagegen.app.log"
 TS="/usr/local/bin/tailscale"
 URL="https://mcgradysmac-mini.tail43cdaa.ts.net"
@@ -39,9 +42,11 @@ start() {
   ensure_token
   if [ -z "$(pid_on_port)" ]; then
     cd "$REPO" || exit 1
+    # 有 claude OAuth token 就帶上 → claude -p 免碰 Keychain（token 無空白，直接當 env 前綴）
+    CCTOK=""; [ -s "$CCTOKFILE" ] && CCTOK="CLAUDE_CODE_OAUTH_TOKEN=$(cat "$CCTOKFILE")"
     # nohup + 全 fd 導向檔案 → do shell script 不會卡著等；ANTHROPIC_API_KEY 清掉走訂閱
     APP_TOKEN="$(cat "$TOKFILE")" \
-      /usr/bin/nohup /usr/bin/env -u ANTHROPIC_API_KEY PATH="$SRV_PATH" \
+      /usr/bin/nohup /usr/bin/env -u ANTHROPIC_API_KEY $CCTOK PATH="$SRV_PATH" \
       "$VENV/bin/uvicorn" server:app --host 127.0.0.1 --port $PORT >> "$LOG" 2>&1 &
     disown 2>/dev/null
   fi
@@ -80,6 +85,11 @@ status() {
     echo "本地4B: 🟢 已載入(閒置 10 分自動卸載)"
   else
     echo "本地4B: ⚪️ 未載入(手機選本地時才啟動)"
+  fi
+  if [ -s "$CCTOKFILE" ]; then
+    echo "寫prompt: 🟢 Claude（訂閱 token 已設）"
+  else
+    echo "寫prompt: ⚪️ 逾時退回原文（未設 claude token；跑 claude setup-token 可啟用）"
   fi
   echo "網址　: $URL"
   echo "Token : $(cat "$TOKFILE" 2>/dev/null)"
