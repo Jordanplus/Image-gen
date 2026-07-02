@@ -140,8 +140,11 @@ $('go').addEventListener('click', async () => {
     headers: { 'X-App-Token': localStorage.getItem('app_token') || '' } });
 
   // 跳動的階段訊息 + 秒數（就算串流被緩衝，計時器照跳，不會像當機）
+  const isLocal = $('model').value.startsWith('local/');   // 本地 4B vs apipass → 文案不同
+  const genMsg = isLocal ? '🎨 本地 4B 生圖中…（這台跑，約 1 分）'
+                         : '🎨 生圖中…（apipass，通常還要 20–50 秒）';
   const t0 = Date.now();
-  let stageMsg = $('writep').checked ? '✍️ Claude 正在寫 prompt…' : '🎨 生圖中…';
+  let stageMsg = $('writep').checked ? '✍️ Claude 正在寫 prompt…' : genMsg;
   const render = () => { $('status').innerHTML =
     '<span class="spin"></span>' + stageMsg + '（已 ' + Math.round((Date.now()-t0)/1000) + ' 秒）'; };
   const timer = setInterval(render, 500); render();
@@ -155,11 +158,12 @@ $('go').addEventListener('click', async () => {
         $('prompt').textContent = '📝 ' + ev.prompt + (ev.note ? '　（' + ev.note + '）' : '');
         $('prompt').style.display='block';
       }
-      stageMsg = '🎨 生圖中…（apipass，通常還要 20–50 秒）';
+      stageMsg = genMsg;
     } else if (ev.stage === 'generating') {
-      stageMsg = '🎨 生圖中…（apipass，通常還要 20–50 秒）';
+      stageMsg = genMsg;
     } else if (ev.stage === 'progress') {
-      stageMsg = '🎨 生圖中…（apipass 處理中，伺服器已等 ' + (ev.waited || 0) + ' 秒）';
+      stageMsg = (isLocal ? '🎨 本地 4B 生圖中…（已跑 ' : '🎨 生圖中…（apipass 處理中，伺服器已等 ')
+               + (ev.waited || 0) + ' 秒）';
     } else if (ev.stage === 'done') {
       stop();
       $('status').textContent = '✅ 完成（用了 ' + Math.round((Date.now()-t0)/1000) + ' 秒）';
