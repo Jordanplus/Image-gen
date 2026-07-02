@@ -8,14 +8,19 @@ REPO="/Users/mcgradymac/claude_prjs/Image-gen/cloud"
 PORT=8765
 VENV="$REPO/.venv"
 TOKFILE="$REPO/.app_token"
-# claude 訂閱 OAuth token（`claude setup-token` 產）。設了→claude -p 免碰 Keychain，
-# 背景服務(不在互動登入 session)才讀得到訂閱憑證，「Claude 幫寫 prompt」才會生效。
+# （選用）claude 訂閱 OAuth token。正常靠下面 LaunchAgent 讀 Mac 登入 Keychain 的訂閱即可；
+# 這個檔只有在你想改用 setup-token 免 Keychain 時才需要，平常留空。
 CCTOKFILE="$REPO/.claude_oauth_token"
 LOG="/tmp/imagegen.app.log"
 TS="/usr/local/bin/tailscale"
 URL="https://mcgradysmac-mini.tail43cdaa.ts.net"
 # 後端進程要用的 PATH（claude 在 /opt/homebrew/bin）
 SRV_PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$VENV/bin"
+# 關鍵：用 LaunchAgent（GUI domain）跑 uvicorn，行程才在你的登入 session 裡、claude -p 才
+# 讀得到 Keychain 的訂閱憑證（舊的 nohup 背景版脫離 session → claude 讀不到會卡住逾時）。
+PLIST="$HOME/Library/LaunchAgents/com.imagegen.server.plist"
+LABEL="com.imagegen.server"
+GUI="gui/$(id -u)"
 
 pid_on_port() { /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | head -1; }
 healthz_ok()  { /usr/bin/curl -fsS -m 5 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; }
@@ -38,30 +43,62 @@ ensure_token() {
   chmod 600 "$TOKFILE"
 }
 
+write_plist() {
+  # 產生／更新 LaunchAgent plist。ANTHROPIC_API_KEY 不放 → 走訂閱；PATH 含 /opt/homebrew/bin
+  # 讓 server.py 的 subprocess 找得到 claude；PYTHONUNBUFFERED 讓 log 即時。
+  local cctok_line=""
+  [ -s "$CCTOKFILE" ] && cctok_line="    <key>CLAUDE_CODE_OAUTH_TOKEN</key><string>$(cat "$CCTOKFILE")</string>"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>WorkingDirectory</key><string>$REPO</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$VENV/bin/uvicorn</string>
+    <string>server:app</string><string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>$PORT</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$SRV_PATH</string>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+    <key>APP_TOKEN</key><string>$(cat "$TOKFILE")</string>
+$cctok_line
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict></plist>
+PLIST
+  chmod 600 "$PLIST"
+}
+
 start() {
   ensure_token
-  if [ -z "$(pid_on_port)" ]; then
-    cd "$REPO" || exit 1
-    # 有 claude OAuth token 就帶上 → claude -p 免碰 Keychain（token 無空白，直接當 env 前綴）
-    CCTOK=""; [ -s "$CCTOKFILE" ] && CCTOK="CLAUDE_CODE_OAUTH_TOKEN=$(cat "$CCTOKFILE")"
-    # nohup + 全 fd 導向檔案 → do shell script 不會卡著等；ANTHROPIC_API_KEY 清掉走訂閱
-    APP_TOKEN="$(cat "$TOKFILE")" \
-      /usr/bin/nohup /usr/bin/env -u ANTHROPIC_API_KEY $CCTOK PATH="$SRV_PATH" \
-      "$VENV/bin/uvicorn" server:app --host 127.0.0.1 --port $PORT >> "$LOG" 2>&1 &
-    disown 2>/dev/null
+  # 已在跑且健康就不重載（避免每次開 .app 都重啟後端）；否則(重)寫 plist 並載入 GUI domain。
+  if ! healthz_ok; then
+    write_plist
+    launchctl bootout "$GUI/$LABEL" 2>/dev/null          # 冪等：先卸載殘留
+    launchctl bootstrap "$GUI" "$PLIST" 2>/dev/null       # 載進 GUI session → 能讀 Keychain 訂閱
+    launchctl enable "$GUI/$LABEL" 2>/dev/null
   fi
   # 先確保 Tailscale 本身活著（否則 funnel 設定再對也沒用，手機連不上）
   ensure_tailscale
   # 確保 Funnel 開著（持久；已在服務就略過）
   funnel_on || "$TS" funnel --bg $PORT >/dev/null 2>&1
-  # 等 healthz（最多 ~20s）
+  # 等 healthz（最多 ~20s；LaunchAgent 首次載入要幾秒）
   for i in {1..20}; do healthz_ok && break; sleep 1; done
 }
 
 stop() {
-  # 只停後端 uvicorn；Funnel 留著（指向死 port 只會回 502，不曝露任何東西，且重開機自動還原）
-  local p; p="$(pid_on_port)"
-  [ -n "$p" ] && /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null
+  # 卸載 LaunchAgent（連 KeepAlive 一起停）；Funnel 留著（指向死 port 只回 502，不曝露東西）。
+  launchctl bootout "$GUI/$LABEL" 2>/dev/null
+  # 保險：清掉任何殘留佔 port 的 uvicorn（含舊 nohup 版），確保真的停了。
+  /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null
   # 也關掉本地 klein worker（若在跑）→ 釋放 ~7-8GB RAM
   /usr/bin/pkill -f "klein_worker.py" 2>/dev/null
 }
@@ -87,9 +124,9 @@ status() {
     echo "本地4B: ⚪️ 未載入(手機選本地時才啟動)"
   fi
   if [ -s "$CCTOKFILE" ]; then
-    echo "寫prompt: 🟢 Claude（訂閱 token 已設）"
+    echo "寫prompt: 🟢 Claude（OAuth token）"
   else
-    echo "寫prompt: ⚪️ 逾時退回原文（未設 claude token；跑 claude setup-token 可啟用）"
+    echo "寫prompt: 🟢 Claude（Mac 訂閱 · LaunchAgent 讀 Keychain；卡住會自動退回原文）"
   fi
   echo "網址　: $URL"
   echo "Token : $(cat "$TOKFILE" 2>/dev/null)"

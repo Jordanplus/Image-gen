@@ -123,15 +123,21 @@ def claude_write_prompt(intent: str, ref_paths: list, model: str = DEFAULT_PROMP
     cmd = ["claude", "-p", instr, "--model", m, "--output-format", "json"]
     if ref_paths:
         cmd += ["--allowedTools", "Read"]
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)  # 強制走訂閱
-    # 注意：claude 的訂閱憑證存在 macOS 登入 Keychain。由 .app/nohup/背景 detach 出去的服務行程
-    # 不在互動登入 session 裡，讀不到 Keychain → claude 靜默卡住(stdout/stderr 全空)直到逾時。
-    # 徹底解法是給服務設 CLAUDE_CODE_OAUTH_TOKEN(claude setup-token) 免 Keychain；沒設時這裡會逾時，
-    # 由上層接住→退回使用者原文照樣生圖。逾時收短：純文字 40s、有參考圖 90s(讀圖較久)。
-    # stdin=DEVNULL 只是衛生習慣（免得繼承到開著的 stdin）。
+    # 關鍵：只給 claude「乾淨最小環境」。實測 uvicorn（由 LaunchAgent/背景啟動）繼承的完整環境裡
+    # 有某個變數會讓 claude 子行程在極早期就靜默卡死（連 --debug 都吐不出一個字）撐到逾時；剝到
+    # 只剩 PATH/HOME/USER 就正常(~4s)，且照樣讀得到登入 Keychain 的訂閱憑證 → 免任何 token、
+    # 直接用你 Mac 上的 claude 訂閱。不放 ANTHROPIC_API_KEY → 自然走訂閱（設了會變 API 計費）。
+    # start_new_session 讓它脫離 uvicorn 的行程群/訊號處理。
+    src = os.environ
+    env = {"PATH": src.get("PATH", "/opt/homebrew/bin:/usr/bin:/bin"),
+           "HOME": src.get("HOME", ""), "USER": src.get("USER", "")}
+    # CLAUDE_CODE_OAUTH_TOKEN 若有設(選用，install-service.sh/啟動器可帶)也透傳；沒設就靠 Keychain。
+    for k in ("TMPDIR", "LANG", "LC_ALL", "CLAUDE_CODE_OAUTH_TOKEN"):
+        if src.get(k):
+            env[k] = src[k]
+    # 逾時收短：純文字 40s、有參考圖 90s(讀圖較久)。逾時/失敗由上層接住→退回使用者原文照樣生圖。
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=(90 if ref_paths else 40),
-                       env=env, stdin=subprocess.DEVNULL)
+                       env=env, stdin=subprocess.DEVNULL, start_new_session=True)
     if r.returncode != 0:
         raise RuntimeError(f"claude -p 失敗 (rc={r.returncode}): {r.stderr[-300:]}")
     return json.loads(r.stdout)["result"].strip()
