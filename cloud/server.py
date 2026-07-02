@@ -125,7 +125,13 @@ def claude_write_prompt(intent: str, ref_paths: list, model: str = DEFAULT_PROMP
         cmd += ["--allowedTools", "Read"]
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)  # 強制走訂閱
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=150, env=env)
+    # 注意：claude 的訂閱憑證存在 macOS 登入 Keychain。由 .app/nohup/背景 detach 出去的服務行程
+    # 不在互動登入 session 裡，讀不到 Keychain → claude 靜默卡住(stdout/stderr 全空)直到逾時。
+    # 徹底解法是給服務設 CLAUDE_CODE_OAUTH_TOKEN(claude setup-token) 免 Keychain；沒設時這裡會逾時，
+    # 由上層接住→退回使用者原文照樣生圖。逾時收短：純文字 40s、有參考圖 90s(讀圖較久)。
+    # stdin=DEVNULL 只是衛生習慣（免得繼承到開著的 stdin）。
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=(90 if ref_paths else 40),
+                       env=env, stdin=subprocess.DEVNULL)
     if r.returncode != 0:
         raise RuntimeError(f"claude -p 失敗 (rc={r.returncode}): {r.stderr[-300:]}")
     return json.loads(r.stdout)["result"].strip()
@@ -181,13 +187,39 @@ def generate(
         return json.dumps(d, ensure_ascii=False) + "\n"
 
     def stream():
-        # 2) 寫 prompt（訂閱 claude -p）或直接用使用者輸入
-        try:
-            prompt = claude_write_prompt(intent, ref_paths, prompt_model) if write_prompt.lower() == "true" else intent
-        except Exception as e:
-            yield ev({"stage": "error", "where": "prompt", "error": str(e)})
-            return
-        yield ev({"stage": "prompt", "prompt": prompt})
+        # 2) 寫 prompt（訂閱 claude -p）或直接用使用者輸入。
+        #    claude -p 在「.app 背景啟動」的長命服務情境偶爾會卡（讀訂閱憑證碰 Keychain / 冷啟動）。
+        #    同步呼叫會讓串流靜默數十秒 → 手機像當機、甚至被 Funnel/行動網路斷線。
+        #    對策：放背景執行緒 + 每 4s 心跳保活；失敗或逾時就「退回直接用使用者原文」當 prompt，
+        #    確保一定生得出圖（apipass 仍會另外收到參考圖，品質影響有限）。
+        if write_prompt.lower() == "true":
+            pbox = {}
+
+            def _writep():
+                try:
+                    pbox["prompt"] = claude_write_prompt(intent, ref_paths, prompt_model)
+                except Exception as e:  # noqa: BLE001
+                    pbox["error"] = str(e)
+
+            pt = threading.Thread(target=_writep, daemon=True)
+            pt.start()
+            waited = 0
+            while pt.is_alive():
+                pt.join(timeout=4)
+                if pt.is_alive():
+                    waited += 4
+                    yield ev({"stage": "writing_prompt", "waited": waited})  # 心跳：保活
+            prompt = pbox.get("prompt") or intent
+            if not pbox.get("prompt"):
+                # claude 失敗/逾時 → 退回原文，但仍繼續生圖（不再整個中斷）
+                yield ev({"stage": "prompt", "prompt": prompt,
+                          "note": "Claude 寫 prompt 沒成功，改用你的原文生圖",
+                          "warn": (pbox.get("error") or "")[:200]})
+            else:
+                yield ev({"stage": "prompt", "prompt": prompt})
+        else:
+            prompt = intent
+            yield ev({"stage": "prompt", "prompt": prompt})
 
         # 2.5) 本地模型分支（FLUX.2 klein-4B）：隨需拉起 worker → 本機生圖 → 同樣心跳保活。
         #      免 apipass 額度；第一次會等 worker 啟動+載入模型（較久），之後常駐重用。
