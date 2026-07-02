@@ -16,7 +16,18 @@ SRV_PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$VENV/bin"
 
 pid_on_port() { /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | head -1; }
 healthz_ok()  { /usr/bin/curl -fsS -m 5 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; }
-funnel_on()   { "$TS" funnel status 2>/dev/null | grep -q "Funnel on"; }
+# 注意：funnel status 就算 Tailscale 停了也會印殘留設定的註解 "# Funnel on:"，
+# 只有真正在服務時才有無註解的 "(Funnel on)" 那行 → 用它判斷才準。
+funnel_on()   { "$TS" funnel status 2>/dev/null | grep -q "(Funnel on)"; }
+# Tailscale 本身是否在跑（stopped 時 status 會印 "Tailscale is stopped."）。
+ts_running()  { ! "$TS" status 2>&1 | grep -qi "stopped"; }
+ensure_tailscale() {
+  # 重開機／手動關過後，Tailscale 會是 stopped：funnel 設定還在但 tailnet 是死的，
+  # 公開網址整個 DNS 都解不出來，手機必連不上。tailscale up 是冪等的：已在跑近乎 no-op。
+  ts_running && return
+  "$TS" up >/dev/null 2>&1
+  for i in {1..10}; do ts_running && break; sleep 1; done
+}
 
 ensure_token() {
   [ -s "$TOKFILE" ] && return
@@ -34,7 +45,9 @@ start() {
       "$VENV/bin/uvicorn" server:app --host 127.0.0.1 --port $PORT >> "$LOG" 2>&1 &
     disown 2>/dev/null
   fi
-  # 確保 Funnel 開著（持久；已開就略過）
+  # 先確保 Tailscale 本身活著（否則 funnel 設定再對也沒用，手機連不上）
+  ensure_tailscale
+  # 確保 Funnel 開著（持久；已在服務就略過）
   funnel_on || "$TS" funnel --bg $PORT >/dev/null 2>&1
   # 等 healthz（最多 ~20s）
   for i in {1..20}; do healthz_ok && break; sleep 1; done
@@ -56,7 +69,13 @@ status() {
   else
     echo "🔴 服務未啟動"
   fi
-  if funnel_on; then echo "Funnel: 🟢 公開中"; else echo "Funnel: 🔴 未開"; fi
+  if ! ts_running; then
+    echo "Tailscale: 🔴 已停止（手機會連不上，按啟動即自動叫起）"
+  elif funnel_on; then
+    echo "Funnel: 🟢 公開中"
+  else
+    echo "Funnel: 🔴 未開"
+  fi
   if /usr/bin/pgrep -f "klein_worker.py" >/dev/null 2>&1; then
     echo "本地4B: 🟢 已載入(閒置 10 分自動卸載)"
   else
