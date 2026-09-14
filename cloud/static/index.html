@@ -46,7 +46,7 @@
 </style>
 </head>
 <body>
-  <h1>🎨 ImageGen <span>· apipass gpt-image-2</span></h1>
+  <h1>🎨 ImageGen <span>· apipass gpt-image-2.5</span></h1>
 
   <div class="card">
     <label>想生什麼？（用中文/口語描述意圖即可，Claude 會幫你寫 prompt）</label>
@@ -60,8 +60,11 @@
       <div>
         <label>模型</label>
         <select id="model">
-          <option value="openai/gpt-image-2">gpt-image-2</option>
+          <option value="openai/gpt-image-2.5-sunburst">gpt-image-2.5 Sunburst · 品質高</option>
+          <option value="openai/gpt-image-2.5-flare">gpt-image-2.5 Flare · 較快</option>
+          <option value="openai/gpt-image-2">gpt-image-2 · 舊版備援</option>
           <option value="google/nano-banana-pro">nano-banana-pro</option>
+          <option value="google/nano-banana-2">nano-banana-2</option>
           <option value="local/flux2-klein-4b">本地 4B · 免額度(這台生,約 1 分)</option>
         </select>
       </div>

@@ -2,7 +2,7 @@
   "id": "/",
   "name": "ImageGen",
   "short_name": "ImageGen",
-  "description": "個人生圖 — Claude 寫 prompt + apipass gpt-image-2",
+  "description": "個人生圖 — Claude 寫 prompt + apipass gpt-image-2.5",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

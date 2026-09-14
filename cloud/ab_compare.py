@@ -2,7 +2,7 @@
 """A/B 對照：同一個 prompt 同時用兩個後端生圖，並排輸出一張對照圖，
 用「你自己的 prompt」做真實評測（勝過看 benchmark 跑分）。
 
-預設 A=gemini（nano-banana）、B=openai（gpt-image-2），**兩邊都經 apipass.dev**
+預設 A=gemini（nano-banana）、B=openai（gpt-image-2.5），**兩邊都經 apipass.dev**
 （單一把 APIPASS_API_KEY，來自 /Users/mcgradymac/claude_prjs/apipass.env，import generate_image 時自動載入）。
 
 用法（在 cloud/ 下）：
@@ -36,10 +36,10 @@ _KEY_FOR = {
 }
 _LABEL = {
     "gemini": "Gemini Nano Banana (apipass)",
-    "openai": "GPT-image-2 (apipass)",
+    "openai": "GPT-image-2.5 (apipass)",
     "apipass": "apipass",
     "gemini-direct": "Gemini Nano Banana (direct)",
-    "openai-direct": "GPT-image-2 (direct)",
+    "openai-direct": "GPT-image-2.5 (direct)",
 }
 
 

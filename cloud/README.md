@@ -1,4 +1,4 @@
-# ☁️ 線上生圖路線（apipass.dev：GPT-image-2 / Nano Banana）
+# ☁️ 線上生圖路線（apipass.dev：GPT-image-2.5 / Nano Banana）
 
 本資料夾是 Image-gen 的**線上備援路線**，補在本機 ComfyUI 堆疊（SDXL / FLUX，見專案根 `docs/METHODS.md`）旁邊。
 當你要的是**圖內文字 / 地圖 / 文件感 UI** 或臨時想用雲端模型對照時，走這條最快——
@@ -25,7 +25,7 @@
 ## 🚀 快速開始（從專案根或 `cloud/` 執行）
 
 ```bash
-# 預設後端 = openai（gpt-image-2，線上首選）
+# 預設後端 = openai（gpt-image-2.5 Sunburst，線上首選；-m fast 改用 Flare）
 python cloud/generate_image.py -p "a 16th-century world map cartouche with ornate latin labels" \
        -o out.png -q 2K -a 16:9
 
@@ -59,14 +59,15 @@ python cloud/apipass_gen.py --prompt-file p.txt -o out.png --aspect 16:9 -q 2K -
 
 | 旗標 | 說明 |
 | :--- | :--- |
-| `-b {openai,gemini,apipass,gemini-direct,openai-direct}` | 後端（前三者經 apipass.dev）：`openai`=gpt-image-2（**預設/首選**）/ `gemini`=nano-banana / `apipass`=自訂 model；`*-direct`=直連官方 SDK |
-| `--apipass-model <id>` | `-b apipass` 時指定，如 `openai/gpt-image-2`、`google/nano-banana-pro`、`flux/flux-pro-image-2`、`qwen/qwen-image-2`、`seedream/seedream-5-lite-image` |
-| `-m {standard,ultra,fast}` | 等級；gemini→`ultra`=nano-banana-pro / 其餘=nano-banana-2；openai→quality high/medium/low |
-| `-q {1K,2K,4K}` | 解析度（apipass `input.resolution`）；省略＝模型預設 |
+| `-b {openai,gemini,apipass,gemini-direct,openai-direct}` | 後端（前三者經 apipass.dev）：`openai`=gpt-image-2.5（**預設/首選**）/ `gemini`=nano-banana / `apipass`=自訂 model；`*-direct`=直連官方 SDK |
+| `--apipass-model <id>` | `-b apipass` 時指定，如 `openai/gpt-image-2.5-flare`、`openai/gpt-image-2`（舊版）、`google/nano-banana-pro`、`flux/flux-pro-image-2`、`qwen/qwen-image-2`、`seedream/seedream-5-lite-image` |
+| `-m {standard,ultra,fast}` | 等級；gemini→`ultra`=nano-banana-pro / 其餘=nano-banana-2；openai→`fast`=gpt-image-2.5-flare / 其餘=sunburst（openai-direct 另對應 quality low/medium/high） |
+| `-q {1K,2K,4K}` | 解析度（apipass `input.resolution`；openai-direct 換算成精確尺寸，如 4K 16:9=3840x2160）；省略＝模型預設 |
 | `-a {1:1,16:9,9:16,4:3,3:4}` | 長寬比；省略＝模型預設 1:1 |
-| `-r <img...>` | Identity Lock 參考圖（apipass 走 `input.images`，最多 5；direct 後端另計） |
+| `-r <img...>` | Identity Lock 參考圖（apipass 最多 5：2.5 走 `input.input_urls`、其餘走 `input.images`；direct 後端另計） |
 | `-u {x2,x4}` | LANCZOS 後處理放大（純拉伸不增細節；真高解析用 `-q`） |
 | `-s <int>` | Seed（僅 `gemini-direct` 生效；apipass / openai 忽略） |
+| `--openai-quality {low,medium,high,xhigh,max,auto}` | 僅 `openai-direct`：指定 gpt-image-2.5 quality（xhigh/max 較貴）；省略＝依 `-m` 對應。**未實測** |
 
 ---
 
@@ -84,3 +85,8 @@ apipass 路線只需 **標準庫 + Pillow + python-dotenv**（系統 python3 已
 
 > 🪤 **陷阱（已處理）**：`recordInfo` 會在 `param` 等欄位**原樣回吐輸入**（含參考圖 base64）。
 > 結果抽取時 `_walk(skip=_ECHO_KEYS)` 會跳過這些子樹，否則會把**輸入參考圖誤當輸出**（「回傳同一張圖」）。
+
+> 🆕 **gpt-image-2.5 與 gpt-image-2 在 apipass 的欄位差異**（2026-09 起預設 2.5；`apipass_gen.py` 依 model 自動處理）：
+> 參考圖送 `input.input_urls`（2 是 `input.images`）；**沒有 `quality`**，只依 `resolution` 1k/2k/4k 計點（10/15/22 點）；
+> 比例另支援 `3:2`、`2:3`、`21:9`、`auto` 等。出處：apipass 模型頁 `apipass.dev/model/gpt-image-25/openai_gpt-image-2.5`。
+> ⚠️ **尚未實測**：apipass 2.5 實際出圖、`input_urls` 是否接受 base64（文件建議用 https 網址）。若鎖臉/參考圖沒作用，先查這點。

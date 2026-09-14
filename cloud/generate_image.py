@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 from PIL import Image
 import io
@@ -25,39 +26,41 @@ except Exception:
 def _apipass_model(backend: str, model_type: str) -> str:
     """後端名 → apipass.dev model id。"""
     if backend == "openai":
-        return "openai/gpt-image-2"
+        # gpt-image-2.5：fast → Flare（快）；其餘 → Sunburst（品質高，預設）
+        return "openai/gpt-image-2.5-flare" if model_type == "fast" else "openai/gpt-image-2.5-sunburst"
     if backend == "gemini":
         return "google/nano-banana-pro" if model_type == "ultra" else "google/nano-banana-2"
-    return "openai/gpt-image-2"
+    return "openai/gpt-image-2.5-sunburst"
 
 
-def generate_image(prompt: str, output_filename: str, model_type: str = "standard", upscale_factor: str = None, seed: int = None, reference_images: list = None, resolution: str = None, aspect_ratio: str = None, backend: str = "openai", apipass_model: str = None):
+def generate_image(prompt: str, output_filename: str, model_type: str = "standard", upscale_factor: str = None, seed: int = None, reference_images: list = None, resolution: str = None, aspect_ratio: str = None, backend: str = "openai", apipass_model: str = None, openai_quality: str = None):
     """生圖統一入口，依 backend 分流。
 
     預設後端（gemini / openai / apipass）一律經 **apipass.dev**（金鑰 APIPASS_API_KEY，來自 apipass.env）：
-      - openai  → apipass model openai/gpt-image-2
+      - openai  → apipass model openai/gpt-image-2.5-sunburst（-m fast → openai/gpt-image-2.5-flare）
       - gemini  → apipass model google/nano-banana-pro(ultra) / google/nano-banana-2(其餘)
-      - apipass → 由 apipass_model 指定（預設 openai/gpt-image-2，亦可填 flux/qwen/seedream…）
+      - apipass → 由 apipass_model 指定（預設 openai/gpt-image-2.5-sunburst，亦可填 openai/gpt-image-2、flux/qwen/seedream…）
     直連 SDK 版（需各自 GEMINI_API_KEY / OPENAI_API_KEY）：gemini-direct / openai-direct。
+    openai_quality：僅 openai-direct 用，指定 gpt-image-2.5 quality（low/medium/high/xhigh/max/auto）。
     成功回傳 output_filename，失敗回傳 None（供 A/B 對照判斷）。
     """
     if backend == "gemini-direct":
         return _generate_gemini(prompt, output_filename, model_type, upscale_factor, seed, reference_images, resolution, aspect_ratio)
     if backend == "openai-direct":
-        return _generate_openai(prompt, output_filename, model_type, upscale_factor, seed, reference_images, resolution, aspect_ratio)
+        return _generate_openai(prompt, output_filename, model_type, upscale_factor, seed, reference_images, resolution, aspect_ratio, openai_quality)
     # 預設：經 apipass.dev
     model_id = apipass_model or _apipass_model(backend, model_type)
     return _generate_via_apipass(prompt, output_filename, model_id, model_type, upscale_factor, seed, reference_images, resolution, aspect_ratio)
 
 
 def _generate_via_apipass(prompt, output_filename, model_id, model_type="ultra", upscale_factor=None, seed=None, reference_images=None, resolution=None, aspect_ratio=None):
-    """經 apipass.dev 生圖（gpt-image-2 / nano-banana / flux …）；參考圖＝input.images（Identity Lock）。"""
+    """經 apipass.dev 生圖（gpt-image-2.5 / gpt-image-2 / nano-banana / flux …）；參考圖欄位由 apipass_gen 依模型決定（Identity Lock）。"""
     if generate_apipass is None:
         print("錯誤：無法載入 apipass_gen.generate_apipass（確認同目錄有 apipass_gen.py）。")
         return None
     if seed is not None:
         print("ℹ️ apipass 後端不支援固定 seed，已忽略 -s。")
-    # quality 僅 gpt-image 系列吃；nano-banana 等省略以免被拒。
+    # quality 僅 gpt-image-2 吃（gpt-image-2.5 在 apipass 無此欄位，由 apipass_gen 略過）；nano-banana 等省略以免被拒。
     quality = None
     if model_id.startswith("openai/"):
         quality = {"ultra": "high", "standard": "medium", "fast": "low"}.get(model_type, "high")
@@ -195,47 +198,54 @@ def _generate_gemini(prompt: str, output_filename: str, model_type: str = "stand
         return None
 
 
-# gpt-image-2 支援的固定 size 清單（官方文件 2026-04）。
-_OPENAI_SIZES = {"1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "auto"}
+# gpt-image-2.5 自訂尺寸規則（OpenAI Image generation guide，2026-09）：
+# 邊長為 16 的倍數、每邊 ≤ 3840、長短邊比 ≤ 3:1、總像素 655,360～8,294,400。
+_OPENAI_PIXELS_MIN = 655_360
+_OPENAI_PIXELS_MAX = 8_294_400
+_OPENAI_LONG_EDGE = {"1K": 1024, "2K": 2048, "4K": 3840}
 
 
 def _openai_size(resolution: str, aspect_ratio: str):
-    """把 (resolution, aspect) 對到 gpt-image-2 支援的最接近 size。
+    """把 (resolution, aspect) 換成 gpt-image-2.5 可接受的精確 WxH。
 
-    gpt-image-2 只接受固定尺寸（非任意長寬比），故無法完全吻合的會取最接近者並回傳警告。
-    回傳 (size, warn|None)。
+    長邊依解析度取 1024/2048/3840，短邊照比例算並對齊 16 的倍數；
+    超出總像素上下限時等比縮放（例：4K 1:1 → 2880x2880）。回傳 (size, warn|None)。
     """
     ar = aspect_ratio or "1:1"
     res = (resolution or "1K").upper()
-    # 各長寬比 → {1K,2K,4K} 的最接近支援尺寸
-    table = {
-        "1:1":  {"1K": "1024x1024", "2K": "2048x2048", "4K": "2048x2048"},
-        "16:9": {"1K": "2048x1152", "2K": "2048x1152", "4K": "3840x2160"},
-        "9:16": {"1K": "1024x1536", "2K": "1024x1536", "4K": "2160x3840"},
-        "4:3":  {"1K": "1536x1024", "2K": "1536x1024", "4K": "1536x1024"},
-        "3:4":  {"1K": "1024x1536", "2K": "1024x1536", "4K": "1024x1536"},
-    }
-    sizes = table.get(ar)
-    if not sizes:
-        return "auto", f"gpt-image-2 無對應長寬比 {ar} → 用 auto（模型自選）"
-    size = sizes.get(res, sizes["1K"])
+    try:
+        a, b = (int(x) for x in ar.split(":"))
+    except ValueError:
+        return "auto", f"無法解析長寬比 {ar} → 用 auto（模型自選）"
+    if max(a, b) > 3 * min(a, b):
+        return "auto", f"長寬比 {ar} 超過 3:1 上限 → 用 auto（模型自選）"
+    long_edge = _OPENAI_LONG_EDGE.get(res, 1024)
+    w, h = (long_edge, long_edge * b / a) if a >= b else (long_edge * a / b, long_edge)
+    pixels = w * h
     warn = None
-    if ar == "1:1" and res == "4K":
-        warn = "gpt-image-2 無 4K 正方形 → 改用 2048x2048（最大方圖）"
-    elif ar in ("9:16",) and res in ("1K", "2K"):
-        warn = f"gpt-image-2 無 {res} 的 9:16 → 用 {size}(≈2:3)，真 9:16 僅 4K(2160x3840)"
-    elif ar in ("4:3", "3:4") and res in ("2K", "4K"):
-        warn = f"gpt-image-2 無 {ar} 高解析原生尺寸 → 用 {size}（之後可 -u 放大）"
-    return size, warn
+    if pixels > _OPENAI_PIXELS_MAX:
+        s = math.sqrt(_OPENAI_PIXELS_MAX / pixels)
+        w, h = math.floor(w * s / 16) * 16, math.floor(h * s / 16) * 16
+        warn = f"{res} {ar} 超過總像素上限 → 縮為 {w}x{h}"
+    elif pixels < _OPENAI_PIXELS_MIN:
+        s = math.sqrt(_OPENAI_PIXELS_MIN / pixels)
+        w, h = math.ceil(w * s / 16) * 16, math.ceil(h * s / 16) * 16
+        warn = f"{res} {ar} 低於總像素下限 → 放大為 {w}x{h}"
+    else:
+        w, h = round(w / 16) * 16, round(h / 16) * 16
+    return f"{w}x{h}", warn
 
 
-def _generate_openai(prompt: str, output_filename: str, model_type: str = "standard", upscale_factor: str = None, seed: int = None, reference_images: list = None, resolution: str = None, aspect_ratio: str = None):
-    """使用 OpenAI gpt-image-2 直連 SDK 生成影像（openai-direct，需 OPENAI_API_KEY）。
+def _generate_openai(prompt: str, output_filename: str, model_type: str = "standard", upscale_factor: str = None, seed: int = None, reference_images: list = None, resolution: str = None, aspect_ratio: str = None, quality: str = None):
+    """使用 OpenAI gpt-image-2.5 直連 SDK 生成影像（openai-direct，需 OPENAI_API_KEY）。
 
+    ⚠️ 2026-09 依官方文件從 gpt-image-2 改寫，**尚未實測**（本機無 OPENAI_API_KEY）。
     一般線上生圖請改用預設 apipass 路線（-b openai）；此 direct 版供無 apipass 時備援 / A/B 對照。
-    - model_type 對應 gpt-image-2 的 quality：fast→low / standard→medium / ultra→high。
+    - 模型：fast → gpt-image-2.5-flare；其餘 → gpt-image-2.5-sunburst。
+    - quality：未指定時 fast→low / standard→medium / ultra→high；可用 --openai-quality 指定
+      low/medium/high/xhigh/max/auto（xhigh/max 較貴）。
     - 有參考圖 → 走 images.edit（等同 Identity Lock）；否則 images.generate。
-    - gpt-image-2 不支援固定 seed（會忽略 -s）；解析度走固定 size 對照（見 _openai_size）。
+    - 官方文件未列 seed 參數（會忽略 -s）；解析度換算成精確自訂尺寸（見 _openai_size）。
     """
     if not os.environ.get("OPENAI_API_KEY"):
         print("錯誤：找不到 OPENAI_API_KEY 環境變數。")
@@ -247,8 +257,8 @@ def _generate_openai(prompt: str, output_filename: str, model_type: str = "stand
         return None
 
     client = OpenAI()
-    model_name = "gpt-image-2"
-    quality = {"fast": "low", "standard": "medium", "ultra": "high"}.get(model_type, "medium")
+    model_name = "gpt-image-2.5-flare" if model_type == "fast" else "gpt-image-2.5-sunburst"
+    quality = quality or {"fast": "low", "standard": "medium", "ultra": "high"}.get(model_type, "medium")
     size, warn = _openai_size(resolution, aspect_ratio)
 
     print(f"🚀 啟動 {model_name} (OpenAI)... quality={quality} / size={size}")
@@ -256,7 +266,7 @@ def _generate_openai(prompt: str, output_filename: str, model_type: str = "stand
     if warn:
         print(f"⚠️ {warn}")
     if seed is not None:
-        print("ℹ️ gpt-image-2 不支援固定 seed，已忽略 -s（A/B 跨模型本就無法共用 seed）。")
+        print("ℹ️ gpt-image-2.5 官方文件未列 seed 參數，已忽略 -s（A/B 跨模型本就無法共用 seed）。")
 
     opened = []
     try:
@@ -268,7 +278,7 @@ def _generate_openai(prompt: str, output_filename: str, model_type: str = "stand
                     missing.append(abs_path)
                     print(f"   ⚠️ 找不到參考圖: {abs_path}")
                     continue
-                # gpt-image-2 的 images.edit 只吃 PNG；專案參考圖多為 .webp → 一律在記憶體內轉 PNG。
+                # images.edit 一律送 PNG：gpt-image-2 只吃 PNG，2.5 官方文件未列輸入格式 → 沿用；專案參考圖多為 .webp。
                 try:
                     ref_img = Image.open(abs_path)
                     if ref_img.mode not in ("RGB", "RGBA"):
@@ -339,28 +349,31 @@ def _generate_openai(prompt: str, output_filename: str, model_type: str = "stand
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Nano Banana / GPT-image-2 線上影像生成（apipass.dev）")
+    parser = argparse.ArgumentParser(description="Nano Banana / GPT-image-2.5 線上影像生成（apipass.dev）")
     parser.add_argument("-p", "--prompt", required=True, help="影像生成提示詞")
     parser.add_argument("-o", "--output", required=True, help="輸出檔案路徑")
     parser.add_argument("-b", "--backend",
                         choices=["gemini", "openai", "apipass", "gemini-direct", "openai-direct"],
                         default="openai",
-                        help="後端（預設皆經 apipass.dev）：openai=gpt-image-2（首選）/ gemini=nano-banana / "
+                        help="後端（預設皆經 apipass.dev）：openai=gpt-image-2.5（首選）/ gemini=nano-banana / "
                              "apipass=自訂 model(見 --apipass-model)；直連 SDK：gemini-direct / openai-direct")
     parser.add_argument("--apipass-model", default=None,
-                        help="backend=apipass 時的 model id，如 openai/gpt-image-2、google/nano-banana-pro、"
-                             "flux/flux-pro-image-2、qwen/qwen-image-2、seedream/seedream-5-lite-image")
+                        help="backend=apipass 時的 model id，如 openai/gpt-image-2.5-flare、openai/gpt-image-2、"
+                             "google/nano-banana-pro、flux/flux-pro-image-2、qwen/qwen-image-2、seedream/seedream-5-lite-image")
     parser.add_argument("-m", "--model", choices=["standard", "ultra", "fast"], default="ultra",
-                        help="模型等級：gemini→ultra=nano-banana-pro/其餘=nano-banana-2；openai→quality high/medium/low")
+                        help="模型等級：gemini→ultra=nano-banana-pro/其餘=nano-banana-2；"
+                             "openai→fast=gpt-image-2.5-flare/其餘=sunburst（openai-direct 另對應 quality low/medium/high）")
     parser.add_argument("-u", "--upscale", choices=["x2", "x4"], default=None,
                         help="LANCZOS 後處理放大（純拉伸不增細節）；真高解析請改用 -q")
     parser.add_argument("-s", "--seed", type=int, default=None, help="隨機種子值 (僅 gemini-direct；apipass/openai 會忽略)")
     parser.add_argument("-r", "--ref", nargs="+", help="參考影像路徑 (Identity Lock)", default=None)
     parser.add_argument("-q", "--resolution", choices=["1K", "2K", "4K"], default=None,
-                        help="原生輸出解析度（gemini 任意比；openai-direct 對到最接近固定 size）。省略＝模型預設。")
+                        help="原生輸出解析度（gemini 任意比；openai-direct 換算成精確尺寸）。省略＝模型預設。")
     parser.add_argument("-a", "--aspect", choices=["1:1", "16:9", "9:16", "4:3", "3:4"], default=None,
                         help="長寬比（省略＝模型預設 1:1）。如港口/地圖 16:9、立繪 3:4")
+    parser.add_argument("--openai-quality", choices=["low", "medium", "high", "xhigh", "max", "auto"], default=None,
+                        help="僅 openai-direct：指定 gpt-image-2.5 quality（xhigh/max 較貴）；省略＝依 -m 對應")
 
     args = parser.parse_args()
     generate_image(args.prompt, args.output, args.model, args.upscale, args.seed, args.ref,
-                   args.resolution, args.aspect, args.backend, args.apipass_model)
+                   args.resolution, args.aspect, args.backend, args.apipass_model, args.openai_quality)

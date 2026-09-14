@@ -2,8 +2,8 @@
 """image-gen 個人手機後端 (MVP)。
 
     [Android PWA] --Tailscale/LAN--> [Mac Mini: FastAPI /generate]
-      ├─ claude -p (訂閱) 看參考圖 + 寫 gpt-image-2 prompt   ← 免費(吃訂閱)，不可設 ANTHROPIC_API_KEY
-      └─ apipass_gen.generate_apipass(...) → apipass gpt-image-2 → 回圖
+      ├─ claude -p (訂閱) 看參考圖 + 寫 prompt(依選到的生圖模型調風格)  ← 免費(吃訂閱)，不可設 ANTHROPIC_API_KEY
+      └─ apipass_gen.generate_apipass(...) → apipass gpt-image-2.5 / nano-banana → 回圖
 
 跑（從 cloud/ 目錄）：
     pip install fastapi "uvicorn[standard]" python-multipart   # + 既有 pillow / python-dotenv
@@ -41,6 +41,40 @@ KLEIN_PORT = int(os.environ.get("KLEIN_PORT", "8770"))
 KLEIN_URL = f"http://127.0.0.1:{KLEIN_PORT}"
 KLEIN_IDLE = os.environ.get("KLEIN_IDLE", "600")  # 閒置幾秒後 worker 自我結束
 LOCAL_MODELS = {"local/flux2-klein-4b"}           # 手機下拉用這個 value 走本地
+
+# ── 圖像模型 → 寫 prompt 時要對齊的目標 ────────────────────────────────────────
+# 不同家族吃的 prompt 風格不同，寫 prompt 的 system 指令要跟著手機上選到的模型走，
+# 否則選 nano-banana 卻拿到照 gpt-image 調的句子。(name, 風格提示)
+DEFAULT_IMAGE_MODEL = "openai/gpt-image-2.5-sunburst"
+# gpt-image-2.5 寫法取自 OpenAI Image prompting guide（2026-09）：場景→主體→細節→限制；圖內文字加引號；
+# 參考圖依序稱 image 1/2…並說明角色與要保留的部分。官方表示 Flare / Sunburst 用同一套寫法。
+_GPT25_STYLE = (
+    "Order the prompt as scene, subject, details, then constraints, and put any text that must "
+    "appear in the image in quotes with its placement. When reference images are provided, call "
+    "them image 1, image 2… in the order listed, state each one's role (subject, style, clothing or "
+    "background) and name what must stay unchanged, such as face, identity and pose.")
+PROMPT_TARGETS = {
+    "openai/gpt-image-2.5-sunburst": ("gpt-image-2.5 Sunburst", _GPT25_STYLE),
+    "openai/gpt-image-2.5-flare": ("gpt-image-2.5 Flare", _GPT25_STYLE),
+    "openai/gpt-image-2": (
+        "gpt-image-2",
+        "It follows long literal instructions well, so be explicit about layout, "
+        "materials and any text that must appear in the image."),
+    "google/nano-banana-pro": (
+        "Nano Banana Pro (gemini-3-pro-image)",
+        "It reads prompts as natural language, so write flowing sentences describing "
+        "scene, lighting and camera instead of a keyword list."),
+    "google/nano-banana-2": (
+        "Nano Banana 2 (gemini-3.1-flash-image)",
+        "It reads prompts as natural language and is the fast tier, so keep to one "
+        "clearly described scene in plain sentences rather than a keyword list."),
+    "local/flux2-klein-4b": (
+        "FLUX.2 klein-4B",
+        "It is a small distilled model, so keep one clear subject with concrete visual "
+        "detail and avoid multi-part or conditional instructions."),
+}
+# prompt 字數上限：2.5 要寫參考圖角色與保留項，80 字太緊（官方範例 50–200 多字）；其餘維持 80。
+PROMPT_MAX_WORDS = {"openai/gpt-image-2.5-sunburst": 120, "openai/gpt-image-2.5-flare": 120}
 
 _worker_proc = None
 _worker_lock = threading.Lock()
@@ -102,16 +136,21 @@ ALLOWED_PROMPT_MODELS = {"haiku", "sonnet", "opus"}
 DEFAULT_PROMPT_MODEL = "sonnet"
 
 
-def claude_write_prompt(intent: str, ref_paths: list, model: str = DEFAULT_PROMPT_MODEL) -> str:
-    """用訂閱跑無頭 `claude -p` 把使用者意圖(+參考圖)寫成 gpt-image-2 prompt。
+def claude_write_prompt(intent: str, ref_paths: list, model: str = DEFAULT_PROMPT_MODEL,
+                        image_model: str = DEFAULT_IMAGE_MODEL) -> str:
+    """用訂閱跑無頭 `claude -p` 把使用者意圖(+參考圖)寫成生圖 prompt。
 
     強制 unset ANTHROPIC_API_KEY → 走 claude.ai 訂閱（設了 API key 會蓋掉訂閱、變成計費）。
     有參考圖時加 `--allowedTools Read`，讓 Claude 讀圖做視覺分析（已實測可行）。
     model: haiku/sonnet/opus（白名單外退回預設）；丟參考圖時 haiku 自動升 sonnet（讀圖視覺分析 Haiku 較弱）。
+    image_model: 手機選到的生圖模型 → 決定 prompt 風格（見 PROMPT_TARGETS）。
     """
+    key = image_model if image_model in PROMPT_TARGETS else DEFAULT_IMAGE_MODEL
+    target, style = PROMPT_TARGETS[key]
     instr = (
-        "You are an expert prompt writer for the gpt-image-2 text-to-image model. "
-        "Turn the user's intent into ONE vivid, concrete English prompt under 80 words. "
+        f"You are an expert prompt writer for the {target} text-to-image model. "
+        f"{style} "
+        f"Turn the user's intent into ONE vivid, concrete English prompt under {PROMPT_MAX_WORDS.get(key, 80)} words. "
         "Output ONLY the prompt text — no preamble, no quotes, no explanation.\n\n"
         f"User intent: {intent}"
     )
@@ -160,7 +199,7 @@ def assetlinks():
 @app.post("/generate")
 def generate(
     intent: str = Form(...),
-    model: str = Form("openai/gpt-image-2"),
+    model: str = Form(DEFAULT_IMAGE_MODEL),
     aspect: str = Form("1:1"),
     resolution: str = Form(""),
     write_prompt: str = Form("true"),
@@ -203,7 +242,7 @@ def generate(
 
             def _writep():
                 try:
-                    pbox["prompt"] = claude_write_prompt(intent, ref_paths, prompt_model)
+                    pbox["prompt"] = claude_write_prompt(intent, ref_paths, prompt_model, model)
                 except Exception as e:  # noqa: BLE001
                     pbox["error"] = str(e)
 

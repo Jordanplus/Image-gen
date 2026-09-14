@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""apipass.dev (task-based) gpt-image-2 / nano-banana adapter.
+"""apipass.dev (task-based) gpt-image-2.5 / gpt-image-2 / nano-banana adapter.
 
 apipass.dev 是雲端影像的非同步轉售包裝：createTask → 輪詢 recordInfo → 取回 CDN 圖 URL，
 與官方同步 schema 不同，故獨立成此 adapter。`generate_apipass()` 可被 generate_image.py
@@ -36,7 +36,14 @@ except ImportError:
 API_BASE = "https://api.apipass.dev"
 CREATE_PATH = "/api/v1/jobs/createTask"
 RECORD_PATH = "/api/v1/jobs/recordInfo"
-DEFAULT_MODEL = "openai/gpt-image-2"
+DEFAULT_MODEL = "openai/gpt-image-2.5-sunburst"
+
+# gpt-image-2.5 系列（openai/gpt-image-2.5、-flare、-sunburst）在 apipass 的輸入欄位與 gpt-image-2 不同。
+# 出處：apipass 模型頁 https://apipass.dev/model/gpt-image-25/openai_gpt-image-2.5（2026-09-14 查）
+#   - 文件列的輸入欄位只有 prompt / input_urls / aspect_ratio / resolution。
+#   - 參考圖用 input_urls（最多 16），不是 gpt-image-2 的 images；沿用 images 很可能被忽略（未實測）。
+#   - 沒有 quality，只依解析度 1k/2k/4k 計點。
+GPT25_PREFIX = "openai/gpt-image-2.5"
 
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
 DONE_BAD = {"fail", "failed", "error", "cancelled", "canceled", "timeout"}
@@ -141,7 +148,7 @@ def _save_image(data, output_filename):
 
 
 def _image_ref(p):
-    """本地檔 → data URI base64；已是 http(s) URL 則原樣傳。供 input.images（Identity Lock）。"""
+    """本地檔 → data URI base64；已是 http(s) URL 則原樣傳。供 input.images / input.input_urls（Identity Lock）。"""
     if isinstance(p, str) and p.lower().startswith("http"):
         return p
     ap = os.path.abspath(os.path.expanduser(p))
@@ -158,8 +165,9 @@ def generate_apipass(prompt, output_filename, aspect_ratio="1:1", resolution=Non
     """apipass 文生圖 / 圖生圖。成功回傳 output_filename，失敗回傳 None。
 
     resolution: None/"1K"/"2K"/"4K" → apipass input.resolution（小寫 1k/2k/4k）。
-    quality:    None/"low"/"medium"/"high" → apipass input.quality（非 gpt-image 模型可能忽略）。
-    images:     參考圖清單（本地路徑或 URL，最多 5）→ input.images，Identity Lock / image-to-image。
+    quality:    None/"low"/"medium"/"high" → apipass input.quality（gpt-image-2 用；gpt-image-2.5 無此欄位，自動略過）。
+    images:     參考圖清單（本地路徑或 URL，最多 5）→ gpt-image-2.5 送 input.input_urls、其餘送 input.images
+                （Identity Lock / image-to-image）。
     """
     try:
         _key()
@@ -167,15 +175,18 @@ def generate_apipass(prompt, output_filename, aspect_ratio="1:1", resolution=Non
         log(f"錯誤：{e}")
         return None
 
+    is_gpt25 = model.startswith(GPT25_PREFIX)
     inp = {
         "prompt": prompt,
         "aspect_ratio": aspect_ratio or "1:1",
-        "enable_base64_output": bool(base64_output),
     }
+    if not is_gpt25:  # 2.5 文件沒列這個欄位，不送
+        inp["enable_base64_output"] = bool(base64_output)
     if resolution:
         inp["resolution"] = resolution.lower()
-    if quality:
+    if quality and not is_gpt25:
         inp["quality"] = quality
+    ref_key = "input_urls" if is_gpt25 else "images"
     if images:
         refs = []
         for p in images[:5]:
@@ -186,11 +197,12 @@ def generate_apipass(prompt, output_filename, aspect_ratio="1:1", resolution=Non
         if not refs:
             log("❌ 要求參考圖但 0 張載入成功 — 中止。")
             return None
-        inp["images"] = refs
-        log(f"🖼️ Identity Lock：{len(refs)} 張參考圖 (input.images)")
+        inp[ref_key] = refs
+        log(f"🖼️ Identity Lock：{len(refs)} 張參考圖 (input.{ref_key})")
     body = {"model": model, "input": inp}
     log(f"🚀 apipass createTask → {model} / aspect={aspect_ratio or '1:1'} / "
-        f"res={resolution or '預設'} / quality={quality or '預設'} / refs={len(inp.get('images', []))}")
+        f"res={resolution or '預設'} / quality={inp.get('quality') or ('不適用' if is_gpt25 else '預設')} / "
+        f"refs={len(inp.get(ref_key, []))}")
     try:
         create = _req(CREATE_PATH, body=body, method="POST")
     except Exception as e:
@@ -237,7 +249,7 @@ def generate_apipass(prompt, output_filename, aspect_ratio="1:1", resolution=Non
 
 
 def main():
-    ap = argparse.ArgumentParser(description="apipass.dev gpt-image-2 / nano-banana adapter")
+    ap = argparse.ArgumentParser(description="apipass.dev gpt-image-2.5 / gpt-image-2 / nano-banana adapter")
     ap.add_argument("-p", "--prompt")
     ap.add_argument("--prompt-file")
     ap.add_argument("-o", "--output", required=True)
@@ -245,7 +257,7 @@ def main():
     ap.add_argument("-q", "--resolution", choices=["1K", "2K", "4K"], default=None,
                     help="apipass input.resolution（1k/2k/4k）")
     ap.add_argument("--quality", choices=["low", "medium", "high"], default=None,
-                    help="apipass input.quality（gpt-image 用；nano-banana 可能忽略）")
+                    help="apipass input.quality（僅 gpt-image-2；gpt-image-2.5 無此欄位會略過、nano-banana 可能忽略）")
     ap.add_argument("-r", "--ref", nargs="+", default=None,
                     help="參考圖（本地路徑或 URL，最多 5）→ Identity Lock / image-to-image")
     ap.add_argument("--model", default=DEFAULT_MODEL)

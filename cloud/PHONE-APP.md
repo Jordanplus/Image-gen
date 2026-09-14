@@ -1,10 +1,10 @@
-# 📱 個人手機生圖 app（Mac Mini 後端 + apipass gpt-image-2）
+# 📱 個人手機生圖 app（Mac Mini 後端 + apipass gpt-image-2.5）
 
-在自己的 Android 手機用 PWA 輸入意圖＋參考圖 → Mac Mini 後端用**你現有的 Claude Code 訂閱**寫 prompt → apipass `gpt-image-2` 生圖回傳。**個人自用**、金鑰只在 Mac Mini、不另開付費 API。
+在自己的 Android 手機用 PWA 輸入意圖＋參考圖 → Mac Mini 後端用**你現有的 Claude Code 訂閱**寫 prompt → apipass `gpt-image-2.5`（預設 Sunburst）生圖回傳。**個人自用**、金鑰只在 Mac Mini、不另開付費 API。
 
 ```
 [Android PWA]  ──Tailscale/LAN──>  [Mac Mini: FastAPI server.py]
-                                      ├─ claude -p（訂閱）看參考圖 + 寫 gpt-image-2 prompt
+                                      ├─ claude -p（訂閱）看參考圖 + 寫 prompt（依選到的生圖模型調風格）
                                       └─ apipass_gen.generate_apipass(...) → apipass → 回圖
 ```
 
@@ -116,7 +116,7 @@ curl https://<機器>.<tailnet>.ts.net/healthz      # 回 {"ok":true} 即三件�
 ```
 
 ## API
-`POST /generate`（multipart form）：`intent`(必) · `model`(預設 openai/gpt-image-2) · `aspect`(1:1…) · `resolution`(""/1K/2K/4K) · `write_prompt`(true/false) · `refs`(檔案，最多 5)。
+`POST /generate`（multipart form）：`intent`(必) · `model`(預設 openai/gpt-image-2.5-sunburst；另可 openai/gpt-image-2.5-flare、openai/gpt-image-2、google/nano-banana-pro、google/nano-banana-2、local/flux2-klein-4b — 也決定 claude 寫 prompt 的風格) · `aspect`(1:1…) · `resolution`(""/1K/2K/4K) · `write_prompt`(true/false) · `refs`(檔案，最多 5)。
 回 `{ok, prompt, image_url}`；圖經 `GET /img/<name>` 取回。`GET /healthz` 健康檢查。
 
 ## 包成 App（兩個層級）

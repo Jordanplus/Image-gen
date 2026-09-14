@@ -1,5 +1,27 @@
 # status.md
 
+## 2026-09-14：線上路線改用 gpt-image-2.5（預設 Sunburst）
+OpenAI 2026-09-08 推出 gpt-image-2.5（Flare 快／Sunburst 品質高）。apipass 已登記
+`openai/gpt-image-2.5`、`-flare`、`-sunburst`（送故意不合法的請求探測：回「參數錯誤」而非「找不到 model」，未扣點）。
+
+| 檔案 | 改動 |
+| --- | --- |
+| `cloud/apipass_gen.py` | 預設 `openai/gpt-image-2.5-sunburst`；2.5 參考圖送 `input_urls`（2 仍送 `images`）、不送 `quality` |
+| `cloud/server.py`、`static/index.html`、`static/sw.js` | 手機預設 Sunburst，選單加 Flare、保留 gpt-image-2 備援；2.5 寫 prompt 指令照官方 prompting guide（場景→主體→細節→限制、參考圖編號＋保留項），上限 120 字；快取 v4 |
+| `cloud/generate_image.py` | `-b openai` → Sunburst（`-m fast` → Flare）；openai-direct 改 2.5：精確自訂尺寸、新增 `--openai-quality`（含 xhigh/max） |
+| 文件 | `cloud/README.md`、`PHONE-APP.md`、根 `README.md`、`CLAUDE.md`、`docs/METHODS.md` 附錄 D、`requirements.txt`、`manifest.webmanifest` |
+
+### 驗證（全離線、未花點數）
+- 假 apipass 伺服器：2.5 送出欄位＝`prompt/aspect_ratio/resolution/input_urls`；gpt-image-2、nano-banana 維持 `images`（gpt-image-2 另帶 quality）✅
+- openai-direct 尺寸換算：3 種解析度 × 5 種比例全部符合官方限制（16 的倍數、每邊 ≤3840、長寬比 ≤3:1、總像素上下限）✅
+- 假 OpenAI SDK：generate / edit 的 model、size、quality 正確 ✅
+- 手機後端：寫 prompt 指令（2.5 → 120 字＋參考圖編號）、`/generate` 預設 model 與參考圖轉交 ✅
+
+### 未實測（使用者決定先不花點數）
+- apipass 2.5 實際出圖；`input_urls` 是否接受 base64 data URI（apipass 文件只「建議」用 https 網址）→ 若鎖臉／參考圖沒作用先查這點。
+- openai-direct：本機無 `OPENAI_API_KEY`，只驗證了參數組裝。
+- 手機後端（LaunchAgent `com.imagegen.server`）需重啟才載入新程式。
+
 ## 最新狀態（2026-06-26）
 **專案目錄重排（方案 B）完成。** 頂層由約 35 個散檔收斂為分類目錄；所有路徑引用已修正並通過驗證。
 

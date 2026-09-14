@@ -83,7 +83,7 @@ ComfyUI 核心 flux forward 新增 kwarg `timestep_zero_index`，`ComfyUI_PuLID_
 - 範本：`/tmp/roster_gen2.py`（free_mem unload + VAEDecodeTiled 全參 + fail-fast）。
 
 ## 附錄 D：8K 路線定案（2026-06-27）
-**雲端生 4K 基底 → 拉回本地 tile-upscale（SDXL img2img / ControlNet tile + `VAEDecodeTiled`）接到 8K**。雲端（GPT-image-2 / Nano Banana Pro）原生上限就是 4K，到不了 8K；純雲端分塊細化無共用 latent → 接縫/漂移、是幻想細節非真超解析、每塊一次計費，故**暫緩**。要 8K 時：cloud 出 4K（`-q 4K`）→ 進本地 tile-upscale。若日後仍要純雲端 8K，優先 GPT-image-2（有 `images.edit` + mask，控制度高於 NBP 提示詞驅動編輯）。
+**雲端生 4K 基底 → 拉回本地 tile-upscale（SDXL img2img / ControlNet tile + `VAEDecodeTiled`）接到 8K**。雲端（GPT-image-2.5 / Nano Banana Pro）原生上限就是 4K，到不了 8K；純雲端分塊細化無共用 latent → 接縫/漂移、是幻想細節非真超解析、每塊一次計費，故**暫緩**。要 8K 時：cloud 出 4K（`-q 4K`）→ 進本地 tile-upscale。若日後仍要純雲端 8K，優先 GPT-image-2.5（有 `images.edit` + mask，控制度高於 NBP 提示詞驅動編輯）。
 
 ---
 - 方法選用決策：`<The-Age-of-Exploration>/tools/art-pipeline/art-creator/METHODS.md`
