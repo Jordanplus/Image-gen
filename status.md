@@ -1,5 +1,12 @@
 # status.md
 
+## 2026-09-15（晚）：立繪寫法探針、Z-Image-Turbo 4-bit、LoRA 外掛
+- 使用者評比重點是**畫質與風格**（不是斑點／年齡）→ 遊戲立繪用 klein-4B＋「露肩＋低胸＋柔光」寫法；測試一律寫實照片風。
+- `recipes/commercial/portrait_style_probe.py`（新）：多種寫法 × 多顆 seed 對照；`--use personal`、`--lora`（LoRA／LoKr，自動改用 HF 快取路徑）、`--low-ram`、`--painted`；本機私有寫法放不進版控的 `portrait_variants_local.py`。
+- `recipes/local_models.py`：新增 `z-image-turbo`、`z-image-turbo-q4`、`qwen-image-2512`；`load()` 可帶 LoRA（FLUX.2、Z-Image）與預先量化模型。
+- 實測（數字見 `docs/LOCAL-MODELS.md`）：Z-Image-Turbo 官方 F32 在 24GB 記憶體不足被砍 → 4-bit 版每張約 173 秒可跑；klein-9B＋LoRA 每張 90–108 秒但記憶體很緊；Qwen-Image-2512 記憶體吃緊時每步 83 秒而中止。已刪 Z-Image-Turbo 官方快取（31GB）。
+- 未完成：MacBook Pro（M5 32GB）上重測 klein-9B＋LoRA 與 Z-Image-Turbo 官方版。
+
 ## 2026-09-15：本地模型分兩組建置（商用／個人），mflux 升 0.19.1
 模型、授權、腳本、實測數字、已知問題、MacBook Pro 建置步驟都在 `docs/LOCAL-MODELS.md`「兩組用途」。
 
@@ -10,14 +17,13 @@
 | 共用 | — | `recipes/local_models.py`（清單＋授權把關＋載入）、`recipes/prefetch_models.py`（新機器預抓驗證） |
 
 ### 實測結論（Mac mini M4 24GB）
-- 商用：同角色同 seed，**klein-4B 最好**（62 秒／張、19→35 歲明顯變老、無斑點）；klein-base-4B（9.4 分）與 Z-Image base（約 18 分）這輪較差，但設定不是官方建議值，公平重測未做。
+- 商用：同角色同 seed，**klein-4B 最好**（62 秒／張、19→35 歲明顯變老、無斑點）。非蒸餾版改用官方設定（8-bit、50 步）重測後畫質變好，但年齡幾乎改不動，且一張 16.6 分（klein-base-4B）／31 分（Z-Image，服裝還偏離 prompt）→ 批次立繪維持 klein-4B；klein-base-4B 可留給要繪畫感的少量主視覺。
 - 個人：真實照片修圖 277 秒，去斑有效、長相保留；強度 1.0 像磨皮 → 預設改 0.7。旅遊合成 4.6 分鐘，長相保留很好，但會照搬參考照的衣服與耳機。
 - 修掉的坑：SeedVR2 在 mflux 0.19.1＋MLX 0.32.2 會 TypeError（載入時自動相容修補）；python API 沒掛 MemorySaver 讓 klein-9B 被系統砍掉（已補）；Haar 抓不到側臉（加 YuNet 後備）；修圖遮罩太大（依真實自拍重新校正）；輸出 JPEG 二次壓縮（改預設 PNG）。
 
 ### 未完成
-- 非蒸餾模型用官方設定公平重測（klein-base guidance 1.5／50 步、Z-Image 50 步、8-bit）。
 - `--softness` 實測；旅遊合成換衣服、較大尺寸；MacBook Pro（M5 32GB）實際建置。
-- 模型快取約 88GB 在 `~/.cache/huggingface/hub`；個人照片與產出都在 `outputs/`（不進版控）。
+- 模型快取在 `~/.cache/huggingface/hub`；個人照片與產出都在 `outputs/`（不進版控）。
 
 ## 2026-09-14：線上路線改用 gpt-image-2.5（預設 Sunburst）
 OpenAI 2026-09-08 推出 gpt-image-2.5（Flare 快／Sunburst 品質高）。apipass 已登記

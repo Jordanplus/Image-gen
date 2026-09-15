@@ -23,13 +23,31 @@ MODELS = {
     "klein-base-4b": dict(
         kind="flux2", config="flux2_klein_base_4b", repo="black-forest-labs/FLUX.2-klein-base-4B",
         license="Apache-2.0", commercial=True, distilled=False,
-        defaults=dict(steps=28, guidance=4.0),
-        note="非蒸餾；guidance>1 才做 CFG，自訂負面提示詞靠下方 _with_negative 包裝"),
+        defaults=dict(steps=50, guidance=1.5),
+        note="非蒸餾；預設取 mflux 文件範例（50 步、guidance 1.5，建議 8-bit）；guidance>1 才做 CFG，自訂負面提示詞靠 _with_negative"),
     "z-image": dict(
         kind="z_image", config="z_image", repo="Tongyi-MAI/Z-Image",
         license="Apache-2.0", commercial=True, distilled=False,
-        defaults=dict(steps=28, guidance=4.0),
-        note="非蒸餾；官方建議 guidance 3–5、28–50 步，原生支援負面提示詞"),
+        defaults=dict(steps=50, guidance=4.0),
+        note="非蒸餾；預設取 mflux 文件範例（50 步、guidance 4，建議 8-bit），原生支援負面提示詞"),
+    "z-image-turbo": dict(
+        kind="z_image", config="z_image_turbo", repo="Tongyi-MAI/Z-Image-Turbo",
+        license="Apache-2.0", commercial=True, distilled=True,
+        defaults=dict(steps=9, guidance=0.0),
+        note="蒸餾版，官方 9 步、guidance 固定 0、不吃負面提示詞。"
+             "官方權重是 F32（31GB）：24GB 機器載入後生到第 2 步記憶體不足被砍（2026-09-15），24GB 請用 z-image-turbo-q4"),
+    "z-image-turbo-q4": dict(
+        kind="z_image", config="z_image_turbo", repo="filipstrand/Z-Image-Turbo-mflux-4bit",
+        license="轉檔者標 Tongyi Qianwen License（基底 Z-Image-Turbo 的 HF 標籤是 Apache-2.0）", commercial=False,
+        distilled=True, prequantized=True,
+        defaults=dict(steps=9, guidance=0.0),
+        note="mflux 作者預先量化的 4-bit 版（5.9GB，mflux 文件示範用這版）；授權標示和官方不一致，先歸個人用途"),
+    "qwen-image-2512": dict(
+        kind="qwen", config="qwen_image", repo="mlx-community/Qwen-Image-2512-4bit",
+        license="Apache-2.0", commercial=True, distilled=False, prequantized=True,
+        defaults=dict(steps=25, guidance=3.5),
+        note="非蒸餾，20B＋7B 視覺語言編碼器；用 mlx-community 預先量化的 4-bit 版（原版約 58GB）；"
+             "預設沿用 2026-06 場景圖設定（25 步、guidance 3.5，1152×768 約 270–340 秒）"),
     "klein-9b": dict(
         kind="flux2", config="flux2_klein_9b", repo="black-forest-labs/FLUX.2-klein-9B",
         license="FLUX Non-Commercial License v2.1", commercial=False, distilled=True,
@@ -138,20 +156,30 @@ def _register_memory_saver(model, *, low_ram, single_run):
                                          num_seeds=1 if single_run else 2))
 
 
-def load(key, use, quantize=4, edit=False, low_ram=False, single_run=False):
-    """依用途把關後載入模型。edit=True 載 FLUX.2 的參考圖編輯版；low_ram／single_run 見 _register_memory_saver。"""
+def load(key, use, quantize=4, edit=False, low_ram=False, single_run=False, lora_paths=None, lora_scales=None):
+    """依用途把關後載入模型。edit=True 載 FLUX.2 的參考圖編輯版；low_ram／single_run 見 _register_memory_saver。
+    lora_paths：本機檔案或 mflux 認得的 HF 路徑 org/repo:檔名（FLUX.2 支援一般 LoRA 與 LyCORIS LoKr）；接 FLUX.2 與 Z-Image。"""
     m = require(key, use)
     _ensure_hf_env()
     from mflux.models.common.config import ModelConfig
     cfg = getattr(ModelConfig, m["config"])()
+    if lora_paths and m["kind"] not in ("flux2", "z_image"):
+        raise SystemExit(f"✗ {key} 這裡還沒接 LoRA（目前只接 FLUX.2、Z-Image）")
     if m["kind"] == "flux2":
         from mflux.models.flux2.variants import Flux2Klein, Flux2KleinEdit
-        model = _with_negative(Flux2KleinEdit if edit else Flux2Klein)(quantize=quantize, model_config=cfg)
+        model = _with_negative(Flux2KleinEdit if edit else Flux2Klein)(
+            quantize=quantize, model_config=cfg, lora_paths=lora_paths, lora_scales=lora_scales)
     elif edit:
         raise SystemExit(f"✗ {key} 不支援參考圖編輯")
     elif m["kind"] == "z_image":
         from mflux.models.z_image import ZImage
-        model = ZImage(quantize=quantize, model_config=cfg)
+        model = ZImage(quantize=None if m.get("prequantized") else quantize,
+                       model_path=m["repo"] if m.get("prequantized") else None,
+                       model_config=cfg, lora_paths=lora_paths, lora_scales=lora_scales)
+    elif m["kind"] == "qwen":
+        from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
+        model = QwenImage(quantize=None if m.get("prequantized") else quantize, model_path=m["repo"],
+                          model_config=cfg)
     elif m["kind"] == "seedvr2":
         _patch_mlx_repeat()
         from mflux.models.seedvr2 import SeedVR2
@@ -178,7 +206,7 @@ def generate(model, key, *, prompt, seed, width, height, steps=None, guidance=No
         if image_paths:
             kw["image_paths"] = [str(p) for p in image_paths]
         return model.generate_image(**kw)
-    if m["kind"] == "z_image":
+    if m["kind"] in ("z_image", "qwen"):
         if image_paths:
             raise SystemExit(f"✗ {key} 不支援參考圖")
         return model.generate_image(seed=seed, prompt=prompt, num_inference_steps=steps, width=width,

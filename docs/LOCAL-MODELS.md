@@ -4,7 +4,7 @@
 > 動機：避免重蹈覆轍——曾因 ① mflux **CLI 載不動 FLUX.2** ② 生圖腳本散落各 session 的
 > `/private/tmp/.../scratchpad`（會被清）而重複摸索半天才找回方法。
 > **規範：每次用 local model 做事 → 腳本放 `image-gen/recipes/`、用法更新此檔。**
-> Last updated: 2026-09-15（新增「商用／個人」兩組用途，mflux 升 0.19.1）
+> Last updated: 2026-09-15（新增「商用／個人」兩組用途，mflux 升 0.19.1；立繪寫法探針、Z-Image-Turbo 4-bit、LoRA 外掛）
 
 ---
 
@@ -31,14 +31,18 @@
 | 模型 key | mflux 設定／HF repo | 授權 | 商用 | 蒸餾 | 用途 | 實抓大小 |
 |---|---|---|---|---|---|---|
 | `klein-4b` | `flux2_klein_4b`／black-forest-labs/FLUX.2-klein-4B | Apache-2.0 | ✅ | 是 | 立繪主力、快速草稿、參考圖編輯 | 15GB |
-| `klein-base-4b` | `flux2_klein_base_4b`／black-forest-labs/FLUX.2-klein-base-4B | Apache-2.0 | ✅ | 否 | 需要自訂負面提示詞時的候選；首輪對照不如 klein-4B（見下方實測）；可用於 LoRA 訓練 | 15GB |
-| `z-image` | `z_image`／Tongyi-MAI/Z-Image | Apache-2.0 | ✅ | 否 | 候選；首輪對照不如 klein-4B（見下方實測） | 19GB |
+| `klein-base-4b` | `flux2_klein_base_4b`／black-forest-labs/FLUX.2-klein-base-4B | Apache-2.0 | ✅ | 否 | 官方設定下偏繪畫風、服裝照 prompt，但年齡幾乎改不動、一張 16.6 分；可留給要繪畫感的少量主視覺、LoRA 訓練 | 15GB |
+| `z-image` | `z_image`／Tongyi-MAI/Z-Image | Apache-2.0 | ✅ | 否 | 官方設定下雜訊消失，但服裝偏離 prompt、年齡改不動、一張約 31 分；不建議用在立繪 | 19GB |
+| `z-image-turbo` | `z_image_turbo`／Tongyi-MAI/Z-Image-Turbo | Apache-2.0 | ✅ | 是 | 官方權重是 F32：**24GB 機器生到第 2 步記憶體不足被砍**，這台請用下一列 | 31GB |
+| `z-image-turbo-q4` | `z_image_turbo`／filipstrand/Z-Image-Turbo-mflux-4bit | 轉檔者標 Tongyi Qianwen License（與官方標籤不一致） | ❌（先歸個人） | 是 | 寫實照片感強；768×1152 每張約 173 秒、峰值 6.4GB；換 seed 臉和姿勢幾乎不變 | 5.9GB |
+| `qwen-image-2512` | `qwen_image`／mlx-community/Qwen-Image-2512-4bit | Apache-2.0 | ✅ | 否 | 6 月場景圖用；立繪測試時記憶體吃緊、每步 83 秒而中止 | 24GB |
 | `seedvr2-3b` | `seedvr2_3b`／numz/SeedVR2_comfyUI | Apache-2.0 | ✅ | — | 放大（兩組共用） | 6.8GB |
 | `klein-9b` | `flux2_klein_9b`／black-forest-labs/FLUX.2-klein-9B | FLUX Non-Commercial License v2.1 | ❌ | 是 | 個人：修照片、把自己放進旅遊圖 | 約 32GB |
 
 「蒸餾」＝把提示詞引導強度固定進模型換取少步數，代價是**不跑負面提示詞**。
 原本推測遊戲立繪的「斑點壓不掉、改年齡數字沒反應」與此有關（The-Age-of-Exploration `tools/art-pipeline/FLUX2-KLEIN-PROMPT-LESSONS.md` §3、§4），
-**2026-09-15 首輪對照不支持這個推測**：同角色同 seed，klein-4B 從 19 → 35 歲明顯變老、皮膚乾淨，非蒸餾版反而較差（見下方實測）。斑點問題這輪沒有重現，仍未驗證。
+**2026-09-15 兩輪對照（含官方設定重測）都不支持這個推測**：同角色同 seed，klein-4B 從 19 → 35 歲明顯變老、皮膚乾淨；非蒸餾版年齡幾乎改不動（見下方實測）。斑點問題兩輪都沒有重現，仍未驗證。
+**使用者的評比重點是畫質與風格，不是斑點／年齡**（2026-09-15 表明），之後的對照以畫質為準、直接看圖挑。
 
 ### 腳本
 | 腳本 | 組別 | 用途 |
@@ -46,6 +50,7 @@
 | `recipes/local_models.py` | 共用 | 模型清單、授權把關、載入、FLUX.2 自訂負面提示詞包裝、SeedVR2 相容修補 |
 | `recipes/prefetch_models.py --set commercial\|personal\|all` | 共用 | 預抓並逐一生小圖驗證（新機器照這支建） |
 | `recipes/commercial/ab_character_cfg.py` | 商用 | 蒸餾 vs 非蒸餾＋負面提示詞的角色立繪對照（斑點、年齡數字、速度），輸出 360px 對照表＋`results.json` |
+| `recipes/commercial/portrait_style_probe.py` | 商用（`--use personal` 可個人） | 同一角色多種寫法 × 多顆 seed 對照；`--model`、`--lora 路徑或 org/repo:檔名`（LoRA／LoKr）、`--low-ram`；預設寫實照片風（`--painted` 才用繪畫句）；不進版控的本機寫法放 `portrait_variants_local.py` |
 | `recipes/personal/retouch_face.py` | 個人 | 真實照片臉部瑕疵：找臉 → 裁切 → klein 編輯 → 高解析時 SeedVR2 放大回去 → 羽化貼回；臉以外像素不動 |
 | `recipes/personal/travel_with_me.py` | 個人 | 1–3 張臉部照片當參考，把自己放進旅遊場景 |
 
@@ -68,10 +73,19 @@
   | klein-4B（6 步、guidance 1.0） | 62–65 秒 | **明顯變老**（額紋、眼尾紋、法令紋），仍是同一張臉 | 寫實、無斑點 |
   | klein-base-4B（28 步、guidance 4、4-bit、負面提示詞） | 約 9.4 分 | 只有法令紋略深 | 蠟感、偏橘、像 3D 渲染 |
   | Z-Image base（28 步、guidance 4、4-bit、負面提示詞） | 約 18 分＊ | 有變化 | 偏黃、顆粒雜訊，表情與服裝偏離 prompt |
+  | klein-base-4B **官方設定**（50 步、guidance 1.5、8-bit、負面提示詞） | 約 16.6 分 | 幾乎沒變 | 蠟感減輕、偏繪畫風，服裝照 prompt（高領、綁帶） |
+  | Z-Image base **官方設定**（50 步、guidance 4、8-bit、負面提示詞） | 約 31 分 | 幾乎沒變 | 雜訊消失、柔和繪畫風；但領口改成低胸，偏離 prompt |
 
-  ＊Z-Image 期間與 klein-9B 下載測試撞在一起（swap 用到 11.8GB），秒數偏慢。
-  ⚠️ 對非蒸餾版不完全公平：mflux 文件範例是 klein-base guidance 1.5／50 步、Z-Image 50 步，量化範例多用 8-bit；以官方設定重測尚未做。
-  ⇒ **商用組立繪維持 klein-4B**。大幅改年齡（19 → 35）改數字有效；小幅（20 → 19、44 → 38）無效（LESSONS §3）。
+  ＊Z-Image 首輪期間與 klein-9B 下載測試撞在一起（swap 用到 11.8GB），秒數偏慢。官方設定重測（`outputs/commercial_ab/20260915_131202_official/`，設定取 mflux 文件範例）期間沒有其他模型在跑。
+  所有版本皮膚都乾淨，斑點問題兩輪都沒重現；樣本只有 1 個角色 × 1 顆 seed。
+  ⇒ **商用組批次立繪維持 klein-4B**：年齡反應最明顯、一張約 1 分鐘。非蒸餾版換官方設定後畫質變好，但年齡一樣改不動，且慢 16–30 倍
+  （45 位 × 2 顆 seed 用 klein-base-4B 在這台約要 25 小時）。
+  若美術方向要「繪畫感」，klein-base-4B 官方設定比 klein-4B 更貼近 prompt 的 painted 風格（klein-4B 會畫成照片），可留給少量主視覺。
+  大幅改年齡（19 → 35）在 klein-4B 有效；小幅（20 → 19、44 → 38）無效（LESSONS §3）。
+- **立繪寫法探針**（klein-4B；`outputs/commercial_style/20260915_191718/contact.jpg`；4 種寫法 × 2 顆 seed，每張約 65 秒）：只改 prompt 就保留 klein-4B 的寫實畫質並加上性感感。
+  使用者選定「露肩＋低胸＋柔光」（襯衣滑落雙肩、低胸綁帶束腹、暖色窗光、帶笑直視）；缺點是束腹偏舞台戲服、時代感稍弱。
+- **Z-Image-Turbo**：官方 F32 權重（31GB）在 24GB 上生到第 2 步記憶體不足被砍；4-bit 版（`z-image-turbo-q4`＋`--low-ram`）768×1152 每張 172–174 秒、峰值 6.4GB、可用記憶體最低 80%。照片感強，但兩顆 seed 的臉和姿勢幾乎一樣。
+- **klein-9B＋LoRA**（個人用途）：mflux 0.19.1 可直接掛 BFL 命名的一般 LoRA 與 LyCORIS LoKr（實測鍵名全部對上）；768×1152 每張 90–108 秒，但 24GB 上可用記憶體最低掉到 15%。
 - SeedVR2-3B（套相容修補）：1024² → 1536² 共 70 秒，MLX 峰值記憶體 18GB（24GB 機器上不能和其他模型同時跑）。
   和 LANCZOS 拉伸並排看（`outputs/mflux_check/seedvr2_vs_lanczos_detail.png`）：睫毛、虹膜紋路、眉毛、毛孔**明顯補出細節**；
   皮膚紋理略偏銳利，必要時調 `softness`（0–1）。它也會把原有的斑點放大得更清楚，所以修圖流程是「先修再放大」。
@@ -85,6 +99,8 @@
   `local_models.load(..., single_run=True, low_ram=True)` 已照命令列的做法補上（`single_run` 只能用在生一張的情況，FLUX.2 每次生成都會重新編碼）。
   2026-09-15 實測：klein-9B 在 24GB 以 1024 輸出＋1024 參考圖編輯、沒掛 MemorySaver → 第 2 步被系統因記憶體不足砍掉；掛上後改 768 可跑完（每步約 49 秒，swap 約 9GB）。
 - **24GB 機器的實測上限**：SeedVR2 放大上限 1536（1024→1536 峰值 18GB，超過的部分用 LANCZOS）；klein-9B 編輯先用 `--edit-size 768`；兩個模型不要同時跑。
+- **mflux 的 LoRA 路徑寫 `org/repo:檔名` 會另外下載一份**到 `~/Library/Caches/mflux/loras`（不讀 HF 快取）→ 探針的 `resolve_lora()` 先用 `hf_hub_download` 取 HF 快取的本機路徑再交給 mflux。
+- **klein-9B、Qwen 等較照字面的模型會把 painted 真的畫成繪畫**（klein-4B 會畫成照片）→ 探針預設改寫實照片風，並拿掉會帶出遊戲 CG 感的 `for a historical strategy game`。
 - **人臉偵測**：正面照用 OpenCV 內建 Haar；四分之三側臉、半邊臉 Haar（含側臉 Haar）都抓不到，改用 OpenCV 官方 YuNet（存在 `~/.cache/image-gen/`，首次自動下載並核對 SHA-256）。
   修圖遮罩比例依正面近距離自拍校正（寬 0.42、高 0.50、中心下移 0.04，原本 0.50×0.62 會蓋到耳朵、頭髮、脖子）；非正面照先 `--dry-run` 看遮罩。
 - **旅遊合成的參考照片會自動裁臉**（`--ref-size` 預設 768，`--no-face-crop` 關閉）：手機原圖整張當參考大多是背景與衣服，mflux 會以約 1MP 編碼，負擔大。
@@ -128,6 +144,7 @@
 
 ### z-image / z-image-turbo（mflux base-model `z-image` / `z-image-turbo`）
 - 範本：`recipes/z_image_resident.py`
+- 24GB 機器跑 Turbo 用預先量化的 `filipstrand/Z-Image-Turbo-mflux-4bit`（`local_models` 的 `z-image-turbo-q4`）；官方 F32 版會記憶體不足。
 
 ### Bonsai-4B-Realistic-Uncensored（mflux）
 - HF：`mlx-community/Bonsai-4B-Realistic-Uncensored`。uncensored 寫實人像。
