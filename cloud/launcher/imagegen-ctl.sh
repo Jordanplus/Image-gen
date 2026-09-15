@@ -12,7 +12,9 @@ TOKFILE="$REPO/.app_token"
 # 這個檔只有在你想改用 setup-token 免 Keychain 時才需要，平常留空。
 CCTOKFILE="$REPO/.claude_oauth_token"
 LOG="/tmp/imagegen.app.log"
-TS="/usr/local/bin/tailscale"
+# 直接叫 App 內的 CLI（不經 /usr/local/bin/tailscale 轉接腳本）：逾時砍掉的才是真正卡住的程序，不留孤兒。
+TS_APP="/Applications/Tailscale.app"
+TS="$TS_APP/Contents/MacOS/tailscale"
 URL="https://mcgradysmac-mini.tail43cdaa.ts.net"
 # 後端進程要用的 PATH（claude 在 /opt/homebrew/bin）
 SRV_PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$VENV/bin"
@@ -24,16 +26,32 @@ GUI="gui/$(id -u)"
 
 pid_on_port() { /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | head -1; }
 healthz_ok()  { /usr/bin/curl -fsS -m 5 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; }
+# tailscale CLI 在 App／網路擴充還沒就緒時會一直卡住不回（2026-09-15 實測）→ 一律加時限：ts_t <秒> <參數...>
+# 逾時用 SIGKILL 砍：Go 程式預設不會因 SIGALRM 結束，單純 alarm 砍不掉。
+ts_t() {
+  local t=$1; shift
+  /usr/bin/perl -e '$t=shift; $p=fork; if(!$p){exec @ARGV or exit 127} $SIG{ALRM}=sub{kill "KILL",$p; exit 124}; alarm $t; waitpid($p,0); exit($?>>8)' "$t" "$TS" "$@"
+}
+ts() { ts_t 15 "$@"; }
 # 注意：funnel status 就算 Tailscale 停了也會印殘留設定的註解 "# Funnel on:"，
 # 只有真正在服務時才有無註解的 "(Funnel on)" 那行 → 用它判斷才準。
-funnel_on()   { "$TS" funnel status 2>/dev/null | grep -q "(Funnel on)"; }
-# Tailscale 本身是否在跑（stopped 時 status 會印 "Tailscale is stopped."）。
-ts_running()  { ! "$TS" status 2>&1 | grep -qi "stopped"; }
+funnel_on()   { ts funnel status 2>/dev/null | grep -q "(Funnel on)"; }
+# Tailscale 狀態：Running / Stopped / NeedsLogin…；CLI 沒回應（App 沒開、擴充沒就緒）→ 空字串。
+# 不用「輸出含 stopped」判斷：CLI 卡住被砍掉時沒有輸出，會被誤判成在跑。
+ts_state()    { ts_t 3 status --json 2>/dev/null | /usr/bin/sed -n 's/.*"BackendState": *"\([A-Za-z]*\)".*/\1/p' | head -1; }
+ts_running()  { [ "$(ts_state)" = "Running" ]; }
+# Tailscale App 本體（選單列那個）是否開著；錨定整行，避免把帶參數的 CLI 程序也算進來。
+ts_app_open() { /usr/bin/pgrep -f "^$TS_APP/Contents/MacOS/Tailscale\$" >/dev/null; }
 ensure_tailscale() {
-  # 重開機／手動關過後，Tailscale 會是 stopped：funnel 設定還在但 tailnet 是死的，
-  # 公開網址整個 DNS 都解不出來，手機必連不上。tailscale up 是冪等的：已在跑近乎 no-op。
-  ts_running && return
-  "$TS" up >/dev/null 2>&1
+  # 重開機後 Tailscale App 不會自己開（沒設登入啟動）→ 由這裡把 App 叫起來（-g 背景開、不搶焦點），CLI 才連得上。
+  ts_app_open || /usr/bin/open -g -a "$TS_APP"
+  # 等 App／網路擴充就緒（CLI 回得出狀態），最多 ~30s
+  local st="" t0=$SECONDS
+  while (( SECONDS - t0 < 30 )); do st="$(ts_state)"; [ -n "$st" ] && break; sleep 1; done
+  [ "$st" = "Running" ] && return
+  # 手動關過連線（Stopped）→ tailscale up 冪等叫起：funnel 設定還在但 tailnet 是死的，公開網址解不出來、手機必連不上。
+  # NeedsLogin 只能到選單列圖示手動登入；ts 有時限，不會卡在這。
+  ts up >/dev/null 2>&1
   for i in {1..10}; do ts_running && break; sleep 1; done
 }
 
@@ -86,10 +104,10 @@ start() {
     launchctl bootstrap "$GUI" "$PLIST" 2>/dev/null       # 載進 GUI session → 能讀 Keychain 訂閱
     launchctl enable "$GUI/$LABEL" 2>/dev/null
   fi
-  # 先確保 Tailscale 本身活著（否則 funnel 設定再對也沒用，手機連不上）
+  # 先確保 Tailscale App 開著且已連線（否則 funnel 設定再對也沒用，手機連不上）
   ensure_tailscale
   # 確保 Funnel 開著（持久；已在服務就略過）
-  funnel_on || "$TS" funnel --bg $PORT >/dev/null 2>&1
+  funnel_on || ts funnel --bg $PORT >/dev/null 2>&1
   # 等 healthz（最多 ~20s；LaunchAgent 首次載入要幾秒）
   for i in {1..20}; do healthz_ok && break; sleep 1; done
 }
@@ -112,7 +130,7 @@ status() {
     echo "🔴 服務未啟動"
   fi
   if ! ts_running; then
-    echo "Tailscale: 🔴 已停止（手機會連不上，按啟動即自動叫起）"
+    echo "Tailscale: 🔴 未連線（手機會連不上；開 ImageGen 會自動打開 Tailscale，若要登入請點選單列圖示）"
   elif funnel_on; then
     echo "Funnel: 🟢 公開中"
   else
