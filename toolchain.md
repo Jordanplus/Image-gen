@@ -31,7 +31,7 @@
 | **Juggernaut XL（v9 Lightning）** `juggernautXL_v9Rdphoto2Lightning.safetensors` | ComfyUI 寫實主模型 | `download_model.sh` → `ComfyUI/models/checkpoints/` | 否 |
 | **FLUX.1-dev-8bit** `mlx-community/FLUX.1-dev-8bit` | mflux 8-bit 寫實 | mflux 首次執行自動拉 HF | 是（gated） |
 | **FLUX.2-klein-9B** | mflux 底模 | HF（mlx-community） | 是（gated） |
-| **Qwen-Image-2512(-4bit)** | mflux 編輯／生成 | HF（mlx-community） | 視版本 |
+| **Qwen-Image-2512(-4bit)** | mflux 編輯／生成 | HF（mlx-community） | 視版本（2026-09-16 本機權重已刪，要用會重新下載） |
 | **Z-Image-Turbo**（Tongyi-MAI） | mflux turbo 草稿（6B，6 步） | HF | 否 |
 | **Mac 修正版 VAE** | 修 MPS VAE 解碼 | `download_model.sh` → `ComfyUI/models/vae/` | 否 |
 | **YOLO 偵測器** | FaceDetailer 臉部偵測 | `download_model.sh` | 否 |

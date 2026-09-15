@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import local_models as lm  # noqa: E402
 
 SETS = {
-    "commercial": ["klein-4b", "klein-base-4b", "z-image", "seedvr2-3b"],
+    # 2026-09-16 依使用者要求精簡：z-image 系列與 klein-base-4b 都太慢、立繪不採用，本機權重已刪，也不再預抓。
+    "commercial": ["klein-4b", "seedvr2-3b"],
     "personal": ["klein-9b", "klein-4b", "seedvr2-3b"],
 }
 OUT = Path("outputs/prefetch_check")

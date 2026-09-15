@@ -31,11 +31,11 @@
 | 模型 key | mflux 設定／HF repo | 授權 | 商用 | 蒸餾 | 用途 | 實抓大小 |
 |---|---|---|---|---|---|---|
 | `klein-4b` | `flux2_klein_4b`／black-forest-labs/FLUX.2-klein-4B | Apache-2.0 | ✅ | 是 | 立繪主力、快速草稿、參考圖編輯 | 15GB |
-| `klein-base-4b` | `flux2_klein_base_4b`／black-forest-labs/FLUX.2-klein-base-4B | Apache-2.0 | ✅ | 否 | 官方設定下偏繪畫風、服裝照 prompt，但年齡幾乎改不動、一張 16.6 分；可留給要繪畫感的少量主視覺、LoRA 訓練 | 15GB |
-| `z-image` | `z_image`／Tongyi-MAI/Z-Image | Apache-2.0 | ✅ | 否 | 官方設定下雜訊消失，但服裝偏離 prompt、年齡改不動、一張約 31 分；不建議用在立繪 | 19GB |
+| `klein-base-4b` | `flux2_klein_base_4b`／black-forest-labs/FLUX.2-klein-base-4B | Apache-2.0 | ✅ | 否 | 官方設定下偏繪畫風、服裝照 prompt，但年齡幾乎改不動、一張 16.6 分；可留給要繪畫感的少量主視覺、LoRA 訓練。**2026-09-16 本機權重已刪、也不再預抓**，要用會重新下載 | 15GB |
+| `z-image` | `z_image`／Tongyi-MAI/Z-Image | Apache-2.0 | ✅ | 否 | 官方設定下雜訊消失，但服裝偏離 prompt、一張約 31 分；不建議用在立繪。**2026-09-16 本機權重已刪、也不再預抓**，要用會重新下載 | 19GB |
 | `z-image-turbo` | `z_image_turbo`／Tongyi-MAI/Z-Image-Turbo | Apache-2.0 | ✅ | 是 | 官方權重是 F32：**24GB 機器生到第 2 步記憶體不足被砍**，這台請用下一列 | 31GB |
-| `z-image-turbo-q4` | `z_image_turbo`／filipstrand/Z-Image-Turbo-mflux-4bit | 轉檔者標 Tongyi Qianwen License（與官方標籤不一致） | ❌（先歸個人） | 是 | 寫實照片感強；768×1152 每張約 173 秒、峰值 6.4GB；換 seed 臉和姿勢幾乎不變 | 5.9GB |
-| `qwen-image-2512` | `qwen_image`／mlx-community/Qwen-Image-2512-4bit | Apache-2.0 | ✅ | 否 | 6 月場景圖用；立繪測試時記憶體吃緊、每步 83 秒而中止 | 24GB |
+| `z-image-turbo-q4` | `z_image_turbo`／filipstrand/Z-Image-Turbo-mflux-4bit | 轉檔者標 Tongyi Qianwen License（與官方標籤不一致） | ❌（先歸個人） | 是 | 寫實照片感強；768×1152 每張約 173 秒、峰值 6.4GB；換 seed 臉和姿勢幾乎不變；近拍容易出現雀斑（要靠 `--skin beauty` 壓）。**2026-09-16 本機權重已刪** | 5.9GB |
+| `qwen-image-2512` | `qwen_image`／mlx-community/Qwen-Image-2512-4bit | Apache-2.0 | ✅ | 否 | 6 月場景圖用；立繪測試時記憶體吃緊、每步 83 秒而中止。**2026-09-16 本機權重已刪**，`recipes/gen_photo_v2.py` 等 6 支場景圖腳本再跑會重新下載（約 37 分） | 24GB |
 | `seedvr2-3b` | `seedvr2_3b`／numz/SeedVR2_comfyUI | Apache-2.0 | ✅ | — | 放大（兩組共用） | 6.8GB |
 | `klein-9b` | `flux2_klein_9b`／black-forest-labs/FLUX.2-klein-9B | FLUX Non-Commercial License v2.1 | ❌ | 是 | 個人：修照片、把自己放進旅遊圖 | 約 32GB |
 
