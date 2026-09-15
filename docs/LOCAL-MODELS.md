@@ -50,7 +50,7 @@
 | `recipes/local_models.py` | 共用 | 模型清單、授權把關、載入、FLUX.2 自訂負面提示詞包裝、SeedVR2 相容修補 |
 | `recipes/prefetch_models.py --set commercial\|personal\|all` | 共用 | 預抓並逐一生小圖驗證（新機器照這支建） |
 | `recipes/commercial/ab_character_cfg.py` | 商用 | 蒸餾 vs 非蒸餾＋負面提示詞的角色立繪對照（斑點、年齡數字、速度），輸出 360px 對照表＋`results.json` |
-| `recipes/commercial/portrait_style_probe.py` | 商用（`--use personal` 可個人） | 同一角色多種寫法 × 多顆 seed 對照；`--model`、`--lora 路徑或 org/repo:檔名`（LoRA／LoKr）、`--low-ram`；預設寫實照片風（`--painted` 才用繪畫句）；不進版控的本機寫法放 `portrait_variants_local.py` |
+| `recipes/commercial/portrait_style_probe.py` | 商用（`--use personal` 可個人） | 同一角色多種寫法 × 多種膚質 × 多顆 seed 對照；`--model`、`--lora 路徑或 org/repo:檔名`（LoRA／LoKr）、`--low-ram`、`--skin`（clean／fair／porcelain／beauty／natural，商用預設 clean、個人預設 fair）；預設寫實照片風（`--painted` 才用繪畫句）；不進版控的本機寫法放 `portrait_variants_local.py` |
 | `recipes/personal/retouch_face.py` | 個人 | 真實照片臉部瑕疵：找臉 → 裁切 → klein 編輯 → 高解析時 SeedVR2 放大回去 → 羽化貼回；臉以外像素不動 |
 | `recipes/personal/travel_with_me.py` | 個人 | 1–3 張臉部照片當參考，把自己放進旅遊場景 |
 
@@ -85,7 +85,9 @@
 - **立繪寫法探針**（klein-4B；`outputs/commercial_style/20260915_191718/contact.jpg`；4 種寫法 × 2 顆 seed，每張約 65 秒）：只改 prompt 就保留 klein-4B 的寫實畫質並加上性感感。
   使用者選定「露肩＋低胸＋柔光」（襯衣滑落雙肩、低胸綁帶束腹、暖色窗光、帶笑直視）；缺點是束腹偏舞台戲服、時代感稍弱。
 - **Z-Image-Turbo**：官方 F32 權重（31GB）在 24GB 上生到第 2 步記憶體不足被砍；4-bit 版（`z-image-turbo-q4`＋`--low-ram`）768×1152 每張 172–174 秒、峰值 6.4GB、可用記憶體最低 80%。照片感強，但兩顆 seed 的臉和姿勢幾乎一樣。
-- **klein-9B＋LoRA**（個人用途）：mflux 0.19.1 可直接掛 BFL 命名的一般 LoRA 與 LyCORIS LoKr（實測鍵名全部對上）；768×1152 每張 90–108 秒，但 24GB 上可用記憶體最低掉到 15%。
+- **klein-9B＋LoRA**（個人用途）：mflux 0.19.1 可直接掛 BFL 命名的一般 LoRA 與 LyCORIS LoKr（實測鍵名全部對上）；768×1152 每張 90–108 秒、704×1216 每張 85–101 秒，但 24GB 上可用記憶體最低掉到 14–18%（再大的尺寸等 32GB 機器）。
+- **膚色偏黃怎麼改**（klein-9B 這類蒸餾模型不吃負面提示詞，只能改正面描述）：風格句的 `warm soft window light`／`muted warm palette` 與膚質句的 `warm glow` 是主因。
+  `--skin fair` 換成中性日光＋白皙膚色句，膚色明顯變白且保留自然光線（個人用途已設為預設）；`--skin porcelain` 更白但整個畫面連背景都轉冷、氣色偏弱。
 - SeedVR2-3B（套相容修補）：1024² → 1536² 共 70 秒，MLX 峰值記憶體 18GB（24GB 機器上不能和其他模型同時跑）。
   和 LANCZOS 拉伸並排看（`outputs/mflux_check/seedvr2_vs_lanczos_detail.png`）：睫毛、虹膜紋路、眉毛、毛孔**明顯補出細節**；
   皮膚紋理略偏銳利，必要時調 `softness`（0–1）。它也會把原有的斑點放大得更清楚，所以修圖流程是「先修再放大」。

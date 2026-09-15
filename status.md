@@ -2,7 +2,7 @@
 
 ## 2026-09-15（晚）：立繪寫法探針、Z-Image-Turbo 4-bit、LoRA 外掛
 - 使用者評比重點是**畫質與風格**（不是斑點／年齡）→ 遊戲立繪用 klein-4B＋「露肩＋低胸＋柔光」寫法；測試一律寫實照片風。
-- `recipes/commercial/portrait_style_probe.py`（新）：多種寫法 × 多顆 seed 對照；`--use personal`、`--lora`（LoRA／LoKr，自動改用 HF 快取路徑）、`--low-ram`、`--painted`；本機私有寫法放不進版控的 `portrait_variants_local.py`。
+- `recipes/commercial/portrait_style_probe.py`（新）：多種寫法 × 多顆 seed 對照；`--use personal`、`--lora`（LoRA／LoKr，自動改用 HF 快取路徑）、`--low-ram`、`--painted`、`--skin`（膚質／膚色：商用預設 clean、個人預設 fair 白皙）；本機私有寫法放不進版控的 `portrait_variants_local.py`。
 - `recipes/local_models.py`：新增 `z-image-turbo`、`z-image-turbo-q4`、`qwen-image-2512`；`load()` 可帶 LoRA（FLUX.2、Z-Image）與預先量化模型。
 - 實測（數字見 `docs/LOCAL-MODELS.md`）：Z-Image-Turbo 官方 F32 在 24GB 記憶體不足被砍 → 4-bit 版每張約 173 秒可跑；klein-9B＋LoRA 每張 90–108 秒但記憶體很緊；Qwen-Image-2512 記憶體吃緊時每步 83 秒而中止。已刪 Z-Image-Turbo 官方快取（31GB）。
 - 未完成：MacBook Pro（M5 32GB）上重測 klein-9B＋LoRA 與 Z-Image-Turbo 官方版。

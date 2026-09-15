@@ -13,7 +13,7 @@ The-Age-of-Exploration/tools/art-pipeline/FLUX2-KLEIN-PROMPT-LESSONS.md：
 跑（專案根目錄）：
   ~/.local/share/uv/tools/mflux/bin/python recipes/commercial/portrait_style_probe.py \
       [--use commercial|personal] [--model klein-4b|klein-9b|z-image-turbo|...] [--lora 路徑或 org/repo:檔名] \
-      [--lora-scale 1.0] [--painted] [--variants 名稱,...] [--seeds 1131265990,424242] [--size 768x1152] [--dry-run]
+      [--lora-scale 1.0] [--painted] [--skin clean|natural|beauty,...] [--variants 名稱,...] [--seeds 1131265990,424242] [--size 768x1152] [--dry-run]
 """
 import argparse
 import json
@@ -53,6 +53,16 @@ VARIANTS = {
                   "at the front cut low across the chest, showing her décolletage and the upper curve of her bust. "),
         body="Bare smooth shoulders and collarbones, a narrow cinched waist and a full bust. ",
         extra=EXPRESSION),
+    # 全身照（2026-09-15 使用者要「全身照，要有美腿的」）：直式尺寸建議 704x1216。
+    "全身＋美腿": dict(
+        style=STYLE.replace("soft cinematic key light", "warm soft window light across her bare shoulders and legs")
+                   .replace("head-and-shoulders framing", "full-length framing from head to toe"),
+        clothing=("She wears a white linen chemise slipping off both shoulders that ends high on her thighs, with a deep "
+                  "green wool bodice laced at the front cut low across the chest, showing her décolletage; her long bare "
+                  "legs are fully visible, barefoot on a wooden floor. "),
+        body=("Bare smooth shoulders, a narrow cinched waist, a full bust, and long slender shapely legs with smooth skin. "
+              "She stands with her weight on one leg, one knee slightly bent. "),
+        extra=EXPRESSION),
 }
 
 # 不進版控的本機寫法（repo 是公開的）：接在上面四種之後，輸出檔名的編號照順序往後排。
@@ -67,16 +77,41 @@ if _LOCAL_VARIANTS.exists():
 
 # 寫實照片風（預設）：klein-4B 會把 painted 直接畫成照片，但 klein-9B、Qwen 等較照字面的模型會真的畫成繪畫。
 # 使用者 2026-09-15：「不要繪畫風格，都測寫實的」→ 預設一律照片風（也拿掉會帶出遊戲 CG 感的 for a game），--painted 才用原句。
-PHOTO_STYLE = ("Semi-realistic painted character portrait for a historical strategy game",
-               "Photorealistic portrait photograph, natural skin texture")
+PAINTED_LEAD = "Semi-realistic painted character portrait for a historical strategy game"
+# 膚質寫法（照片風的開頭句＋結尾膚質句）：Z-Image-Turbo 很照字面，natural skin texture 會畫出雀斑與明顯毛孔，
+# 使用者不喜歡雀斑（2026-09-15）→ 預設 clean。蒸餾模型不吃負面提示詞，只能靠正面描述；也不寫 no freckles（LESSONS §4）。
+DEFAULT_SKIN = {"commercial": "clean", "personal": "fair"}
+SKIN_PRESETS = {
+    "natural": dict(label="自然紋理", lead="Photorealistic portrait photograph, natural skin texture", skin=SKIN),
+    "clean": dict(label="乾淨膚質", lead="Photorealistic portrait photograph", skin=SKIN),
+    "beauty": dict(label="美妝級膚質", lead="Photorealistic high-end beauty photograph, professionally retouched",
+                   skin=("Smooth, clear, even-toned porcelain skin with a soft satin glow and a flawless complexion, "
+                         "soft diffused beauty light, bright clear eyes with crisp catchlights, beautiful appealing features.")),
+    # 膚色偏黃（2026-09-16 使用者看 klein-9B 出圖的回饋「太黃了」）：暖光、暖色調、warm glow 都會把皮膚往黃推，
+    # 所以白皙系除了改膚色句，也把風格句的暖光／暖色調換成中性或冷色日光。
+    "fair": dict(label="白皙", lead="Photorealistic portrait photograph",
+                 style_swaps=(("warm soft window light", "soft neutral daylight from a window"),
+                              ("muted warm palette", "clean neutral palette")),
+                 skin=("Fair, light skin in one single even tone with a soft rosy-neutral undertone, a fresh natural glow, "
+                       "a soft matte finish, bright clear eyes with crisp catchlights, beautiful appealing features.")),
+    "porcelain": dict(label="瓷白", lead="Photorealistic portrait photograph",
+                      style_swaps=(("warm soft window light", "soft cool daylight from a window"),
+                                   ("soft cinematic key light", "soft cool daylight"),
+                                   ("muted warm palette", "cool airy neutral palette")),
+                      skin=("Very fair porcelain-white skin in one single even tone with a cool pink undertone, a soft "
+                            "luminous finish, bright clear eyes with crisp catchlights, beautiful appealing features.")),
+}
 QUALITY_NEGATIVE = "blurry, low quality, deformed face, deformed hands, extra fingers, watermark, text"
 PAINT_NEGATIVE = "painting, oil painting, illustration, drawing, cartoon, anime, 3d render, cgi, plastic skin"
 
 
-def build_prompt(v, photo=False):
+def build_prompt(v, photo=False, skin="clean"):
     # LESSONS §1 的段落順序：風格 → 服裝 → 髮型 → 身形 → 身分 → 臉 → 神情 → 膚質
-    style = v["style"].replace(*PHOTO_STYLE) if photo else v["style"]
-    return style + v["clothing"] + HAIR + v["body"] + IDENTITY + FACE + v["extra"] + SKIN
+    preset = SKIN_PRESETS[skin]
+    style = v["style"].replace(PAINTED_LEAD, preset["lead"]) if photo else v["style"]
+    for old, new in preset.get("style_swaps", ()):
+        style = style.replace(old, new)
+    return style + v["clothing"] + HAIR + v["body"] + IDENTITY + FACE + v["extra"] + preset["skin"]
 
 
 def negative_for(key, photo):
@@ -149,6 +184,9 @@ def main():
     ap.add_argument("--painted", action="store_true",
                     help="改用原本的繪畫風格句（預設是寫實照片風，非蒸餾模型另加推離繪畫感的負面提示詞）")
     ap.add_argument("--photo-style", action="store_true", help=argparse.SUPPRESS)  # 舊參數：現在預設就是照片風
+    ap.add_argument("--skin", default=None,
+                    help="膚質寫法，逗號分隔可一次比多種：clean（商用預設）、fair（白皙＋中性光，個人預設）、"
+                         "porcelain（瓷白＋冷光）、beauty（美妝級）、natural（自然紋理，Z-Image-Turbo 會有雀斑）")
     ap.add_argument("--low-ram", action="store_true",
                     help="MLX 快取上限 1GB＋VAE 分塊解碼（24GB 機器跑大模型用）")
     ap.add_argument("--dry-run", action="store_true", help="只印計畫與 prompt，不載模型")
@@ -165,18 +203,24 @@ def main():
     unknown = [n for n in names if n not in VARIANTS]
     if unknown:
         raise SystemExit(f"✗ 未知寫法 {unknown}；可用：{list(VARIANTS)}")
+    # 使用者 2026-09-16 定案：個人用途一律白皙；商用立繪維持 clean（選定的「露肩＋低胸＋柔光」靠的就是暖色窗光）。
+    skins = [sk.strip() for sk in (a.skin or DEFAULT_SKIN[a.use]).split(",")]
+    bad = [sk for sk in skins if sk not in SKIN_PRESETS]
+    if bad:
+        raise SystemExit(f"✗ 未知膚質 {bad}；可用：{list(SKIN_PRESETS)}")
+    rows = [(n, sk, n if len(skins) == 1 else f"{n} · {SKIN_PRESETS[sk]['label']}") for n in names for sk in skins]
 
     lora_tag = f"_{re.sub(r'[^A-Za-z0-9._-]+', '-', Path(a.lora.split(':')[-1]).stem)}" if a.lora else ""
     out = Path(f"outputs/{a.use}_style/{time.strftime('%Y%m%d_%H%M%S')}_{key}{lora_tag}")
     neg = negative_for(key, photo)
     d = lm.MODELS[key]["defaults"]
-    print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {len(names)} 種寫法 × {len(seeds)} 顆 seed = "
-          f"{len(names) * len(seeds)} 張 · {width}x{height} · steps {d.get('steps')} · guidance {d.get('guidance')} · "
-          f"{'照片風' if photo else '原風格句'}")
+    print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {len(names)} 種寫法 × {len(skins)} 種膚質 × {len(seeds)} 顆 seed = "
+          f"{len(rows) * len(seeds)} 張 · {width}x{height} · steps {d.get('steps')} · guidance {d.get('guidance')} · "
+          f"{'照片風' if photo else '原風格句'} · 膚質 {','.join(skins)}")
     print(f"== LoRA：{f'{a.lora}（強度 {a.lora_scale}）' if a.lora else '無'}")
     print(f"== 負面提示詞：{neg or '（蒸餾模型不吃）'}")
-    for n in names:
-        print(f"-- {n}：{build_prompt(VARIANTS[n], photo)}")
+    for n, sk, row in rows:
+        print(f"-- {row}：{build_prompt(VARIANTS[n], photo, sk)}")
     if a.dry_run:
         return
 
@@ -187,30 +231,32 @@ def main():
     model = lm.load(key, a.use, low_ram=a.low_ram, lora_paths=[lora_path] if lora_path else None,
                     lora_scales=[a.lora_scale] if lora_path else None)
     results, cells = [], {}
-    for n in names:
-        prompt = build_prompt(VARIANTS[n], photo)
+    for n, sk, row in rows:
+        prompt = build_prompt(VARIANTS[n], photo, sk)
         for seed in seeds:
             t1 = time.time()
             rec = dict(**lm.license_record(key), use=a.use, lora=a.lora, lora_scale=a.lora_scale if a.lora else None,
-                       photo_style=photo, variant=n, seed=seed, width=width, height=height, prompt=prompt,
+                       photo_style=photo, skin=sk, variant=n, seed=seed, width=width, height=height, prompt=prompt,
                        negative_prompt=neg, steps=d.get("steps"), guidance=d.get("guidance"))
             try:
                 img = lm.generate(model, key, prompt=prompt, seed=seed, width=width, height=height,
                                   negative_prompt=neg)
-                path = lm.save(img, out / f"{list(VARIANTS).index(n)}_{seed}.png")
+                idx = list(VARIANTS).index(n)
+                fname = f"{idx}_{seed}.png" if sk == "natural" else f"{idx}_{sk}_{seed}.png"
+                path = lm.save(img, out / fname)
                 rec.update(ok=True, path=str(path), seconds=round(time.time() - t1, 1))
-                cells[(n, seed)] = rec
-                print(f"   ✓ {n} seed {seed}：{rec['seconds']:.0f}s → {path}", flush=True)
+                cells[(row, seed)] = rec
+                print(f"   ✓ {row} seed {seed}：{rec['seconds']:.0f}s → {path}", flush=True)
             except Exception as ex:  # noqa: BLE001
                 rec.update(ok=False, error=repr(ex)[:300], seconds=round(time.time() - t1, 1))
-                print(f"   ✗ {n} seed {seed}：{rec['error']}", flush=True)
+                print(f"   ✗ {row} seed {seed}：{rec['error']}", flush=True)
             results.append(rec)
             lm.free()
     model = None
     lm.free()
     out.mkdir(parents=True, exist_ok=True)
     (out / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
-    sheet = contact_sheet(cells, names, seeds, out / "contact.jpg")
+    sheet = contact_sheet(cells, [row for _, _, row in rows], seeds, out / "contact.jpg")
     print(f"\n== 完成 {(time.time() - t0) / 60:.0f} 分鐘 · 對照表 {sheet} · 紀錄 {out / 'results.json'}")
 
 
