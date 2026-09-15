@@ -1,5 +1,24 @@
 # status.md
 
+## 2026-09-15：本地模型分兩組建置（商用／個人），mflux 升 0.19.1
+模型、授權、腳本、實測數字、已知問題、MacBook Pro 建置步驟都在 `docs/LOCAL-MODELS.md`「兩組用途」。
+
+| 組別 | 模型（授權） | 腳本 |
+| --- | --- | --- |
+| 商用（自製遊戲） | klein-4B（Apache-2.0，立繪主力）、klein-base-4B／Z-Image base（Apache-2.0，候選）、SeedVR2-3B（Apache-2.0，放大） | `recipes/commercial/ab_character_cfg.py`；`recipes/local_models.py` 會擋非商用授權 |
+| 個人（不商用） | klein-9B（FLUX 非商用授權）、klein-4B、SeedVR2-3B | `recipes/personal/retouch_face.py`、`recipes/personal/travel_with_me.py` |
+| 共用 | — | `recipes/local_models.py`（清單＋授權把關＋載入）、`recipes/prefetch_models.py`（新機器預抓驗證） |
+
+### 實測結論（Mac mini M4 24GB）
+- 商用：同角色同 seed，**klein-4B 最好**（62 秒／張、19→35 歲明顯變老、無斑點）；klein-base-4B（9.4 分）與 Z-Image base（約 18 分）這輪較差，但設定不是官方建議值，公平重測未做。
+- 個人：真實照片修圖 277 秒，去斑有效、長相保留；強度 1.0 像磨皮 → 預設改 0.7。旅遊合成 4.6 分鐘，長相保留很好，但會照搬參考照的衣服與耳機。
+- 修掉的坑：SeedVR2 在 mflux 0.19.1＋MLX 0.32.2 會 TypeError（載入時自動相容修補）；python API 沒掛 MemorySaver 讓 klein-9B 被系統砍掉（已補）；Haar 抓不到側臉（加 YuNet 後備）；修圖遮罩太大（依真實自拍重新校正）；輸出 JPEG 二次壓縮（改預設 PNG）。
+
+### 未完成
+- 非蒸餾模型用官方設定公平重測（klein-base guidance 1.5／50 步、Z-Image 50 步、8-bit）。
+- `--softness` 實測；旅遊合成換衣服、較大尺寸；MacBook Pro（M5 32GB）實際建置。
+- 模型快取約 88GB 在 `~/.cache/huggingface/hub`；個人照片與產出都在 `outputs/`（不進版控）。
+
 ## 2026-09-14：線上路線改用 gpt-image-2.5（預設 Sunburst）
 OpenAI 2026-09-08 推出 gpt-image-2.5（Flare 快／Sunburst 品質高）。apipass 已登記
 `openai/gpt-image-2.5`、`-flare`、`-sunburst`（送故意不合法的請求探測：回「參數錯誤」而非「找不到 model」，未扣點）。
@@ -18,7 +37,8 @@ OpenAI 2026-09-08 推出 gpt-image-2.5（Flare 快／Sunburst 品質高）。api
 - 手機後端：寫 prompt 指令（2.5 → 120 字＋參考圖編號）、`/generate` 預設 model 與參考圖轉交 ✅
 
 ### 未實測（使用者決定先不花點數）
-- apipass 2.5 實際出圖；`input_urls` 是否接受 base64 data URI（apipass 文件只「建議」用 https 網址）→ 若鎖臉／參考圖沒作用先查這點。
+- ~~apipass 2.5 實際出圖~~ → **2026-09-15 手機實測通過**：Sunburst / 16:9 / 4K 兩張，各約 10–12MB PNG（後端 log `refs=0`）。
+- `input_urls` 是否接受 base64 data URI（apipass 文件只「建議」用 https 網址）→ 仍未測（上面兩張都沒帶參考圖）；若鎖臉／參考圖沒作用先查這點。
 - openai-direct：本機無 `OPENAI_API_KEY`，只驗證了參數組裝。
 - 手機後端（LaunchAgent `com.imagegen.server`）需重啟才載入新程式。
 
