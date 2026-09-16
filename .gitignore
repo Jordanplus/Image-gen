@@ -40,6 +40,7 @@ docs/video.md
 docs/*.html
 scripts/legacy/my_ai_2026.py
 recipes/commercial/portrait_variants_local.py
+recipes/gui/models_local.py
 
 # ============================================================
 #  OS / Python junk

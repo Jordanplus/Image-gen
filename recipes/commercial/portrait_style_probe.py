@@ -63,6 +63,16 @@ VARIANTS = {
         body=("Bare smooth shoulders, a narrow cinched waist, a full bust, and long slender shapely legs with smooth skin. "
               "She stands with her weight on one leg, one knee slightly bent. "),
         extra=EXPRESSION),
+    # 現代風格（2026-09-16 使用者要牛仔窄短裙）：身分句換成現代人，直式尺寸建議 704x1216。
+    "現代牛仔短裙": dict(
+        style=STYLE.replace("soft cinematic key light", "warm soft window light across her bare shoulders and legs")
+                   .replace("head-and-shoulders framing", "full-length framing from head to toe"),
+        clothing=("She wears a fitted white ribbed crop top and a tight denim mini skirt that sits high on her hips, "
+                  "bare legs, white sneakers. "),
+        body=("Bare smooth shoulders, a narrow waist, and long slender shapely legs with smooth skin. She stands with "
+              "her weight on one leg, one knee slightly bent. "),
+        identity="A 24-year-old woman with a slim figure, present-day fashion. ",
+        extra=EXPRESSION),
 }
 
 # 不進版控的本機寫法（repo 是公開的）：接在上面四種之後，輸出檔名的編號照順序往後排。
@@ -80,6 +90,40 @@ if _LOCAL_VARIANTS.exists():
 PAINTED_LEAD = "Semi-realistic painted character portrait for a historical strategy game"
 # 膚質寫法（照片風的開頭句＋結尾膚質句）：Z-Image-Turbo 很照字面，natural skin texture 會畫出雀斑與明顯毛孔，
 # 使用者不喜歡雀斑（2026-09-15）→ 預設 clean。蒸餾模型不吃負面提示詞，只能靠正面描述；也不寫 no freckles（LESSONS §4）。
+# 身形微調：接在身形句後面（LESSONS §2 描述衣服底下的身體）。default＝照原寫法。
+# 長相類型（不綁定任何真人，只用五官描述）：face 取代預設五官句，hair 有寫就一併取代髮型句。
+# 姿勢（2026-09-16 使用者要 12 種）：取代身形句裡的預設站姿；不指定就完全照舊。
+DEFAULT_POSE = "She stands with her weight on one leg, one knee slightly bent. "
+POSE_PRESETS = {
+    "default": dict(label="原本站姿", text=DEFAULT_POSE),
+    "back": dict(label="背對回眸", text="She stands with her back to the camera, looking back over one shoulder. "),
+    "hair": dict(label="雙手撩髮", text="She stands with both arms raised, hands gathering her hair above her head, elbows out. "),
+    "profile": dict(label="側身站立", text="She stands in profile, one hip pushed out, arms relaxed at her sides. "),
+    "stool": dict(label="坐木凳", text="She sits on a low wooden stool, legs crossed at the knee, leaning slightly forward. "),
+    "floor": dict(label="地板側坐", text="She sits on the floor with her legs folded to one side, one hand on the floor behind her. "),
+    "kneel": dict(label="跪坐", text="She kneels upright on the floor, back straight, hands resting on her thighs. "),
+    "wall": dict(label="靠牆", text="She leans back against a plain wall, one foot flat against it, head tilted back slightly. "),
+    "side": dict(label="側躺", text="She lies on her side on a low bed, head propped on one hand, legs slightly bent. "),
+    "supine": dict(label="仰躺", text="She lies on her back on a low bed, knees bent, both arms stretched above her head. "),
+    "prone": dict(label="趴臥", text="She lies face down on a low bed, propped up on her forearms, ankles crossed in the air. "),
+    "stretch": dict(label="踮腳伸展", text="She stands on tiptoe, arms stretched high above her head, back gently arched. "),
+}
+FACE_PRESETS = {
+    "default": dict(label="原本", face=None, hair=None),
+    "fringe": dict(label="齊瀏海褐眼",
+                   face=("An oval face with soft delicate features, high cheekbones, hazel-green eyes with a direct "
+                         "gaze, and full natural lips. "),
+                   hair=("Her long dark-blonde hair is loosely pinned up, with a soft blunt fringe falling to her "
+                         "eyebrows and a few loose strands framing her face. ")),
+}
+BUST_PRESETS = {
+    "default": "",
+    "full": "Her bust is large, full and firm, with a rounded upper curve and a natural lift. ",
+    "fuller": ("Her bust is very large, full and firm, sitting high and round with a pronounced upper curve and a "
+               "strong natural lift. "),
+    "huge": ("Her bust is extremely large and heavy yet firm, sitting high on her chest with a deep cleavage, a "
+             "pronounced round upper curve and a strong lift. "),
+}
 DEFAULT_SKIN = {"commercial": "clean", "personal": "fair"}
 SKIN_PRESETS = {
     "natural": dict(label="自然紋理", lead="Photorealistic portrait photograph, natural skin texture", skin=SKIN),
@@ -105,13 +149,19 @@ QUALITY_NEGATIVE = "blurry, low quality, deformed face, deformed hands, extra fi
 PAINT_NEGATIVE = "painting, oil painting, illustration, drawing, cartoon, anime, 3d render, cgi, plastic skin"
 
 
-def build_prompt(v, photo=False, skin="clean"):
+def build_prompt(v, photo=False, skin="clean", bust="default", face="default", pose="default"):
     # LESSONS §1 的段落順序：風格 → 服裝 → 髮型 → 身形 → 身分 → 臉 → 神情 → 膚質
     preset = SKIN_PRESETS[skin]
+    fp = FACE_PRESETS[face]
     style = v["style"].replace(PAINTED_LEAD, preset["lead"]) if photo else v["style"]
     for old, new in preset.get("style_swaps", ()):
         style = style.replace(old, new)
-    return style + v["clothing"] + HAIR + v["body"] + IDENTITY + FACE + v["extra"] + preset["skin"]
+    body = v["body"]
+    if pose != "default":
+        # 換姿勢時先拿掉原本的站姿句（各寫法的句尾不一定一樣，用整句比對會漏掉），避免兩個姿勢並存
+        body = re.sub(r"She stands with her weight on one leg[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
+    return (style + v["clothing"] + (fp["hair"] or HAIR) + body + BUST_PRESETS[bust]
+            + v.get("identity", IDENTITY) + (fp["face"] or FACE) + v["extra"] + preset["skin"])
 
 
 def negative_for(key, photo):
@@ -187,6 +237,10 @@ def main():
     ap.add_argument("--skin", default=None,
                     help="膚質寫法，逗號分隔可一次比多種：clean（商用預設）、fair（白皙＋中性光，個人預設）、"
                          "porcelain（瓷白＋冷光）、beauty（美妝級）、natural（自然紋理，Z-Image-Turbo 會有雀斑）")
+    ap.add_argument("--bust", default="default", choices=list(BUST_PRESETS), help="身形微調：full＝豐滿堅挺，fuller＝更大更高，huge＝再更大")
+    ap.add_argument("--face", default="default", choices=list(FACE_PRESETS), help="長相類型：fringe＝齊瀏海、褐綠色眼睛、深金褐長髮")
+    ap.add_argument("--pose", default="default",
+                    help="姿勢，逗號分隔可一次跑多種，all＝全部 12 種：" + "、".join(POSE_PRESETS))
     ap.add_argument("--low-ram", action="store_true",
                     help="MLX 快取上限 1GB＋VAE 分塊解碼（24GB 機器跑大模型用）")
     ap.add_argument("--dry-run", action="store_true", help="只印計畫與 prompt，不載模型")
@@ -208,19 +262,31 @@ def main():
     bad = [sk for sk in skins if sk not in SKIN_PRESETS]
     if bad:
         raise SystemExit(f"✗ 未知膚質 {bad}；可用：{list(SKIN_PRESETS)}")
-    rows = [(n, sk, n if len(skins) == 1 else f"{n} · {SKIN_PRESETS[sk]['label']}") for n in names for sk in skins]
+    poses = list(POSE_PRESETS) if a.pose == "all" else [p.strip() for p in a.pose.split(",")]
+    bad_pose = [p for p in poses if p not in POSE_PRESETS]
+    if bad_pose:
+        raise SystemExit(f"✗ 未知姿勢 {bad_pose}；可用：{list(POSE_PRESETS)} 或 all")
+    def _row(n, sk, po):
+        parts = [n]
+        if len(skins) > 1:
+            parts.append(SKIN_PRESETS[sk]["label"])
+        if len(poses) > 1 or po != "default":
+            parts.append(POSE_PRESETS[po]["label"])
+        return " · ".join(parts)
+    rows = [(n, sk, po, _row(n, sk, po)) for n in names for sk in skins for po in poses]
 
     lora_tag = f"_{re.sub(r'[^A-Za-z0-9._-]+', '-', Path(a.lora.split(':')[-1]).stem)}" if a.lora else ""
-    out = Path(f"outputs/{a.use}_style/{time.strftime('%Y%m%d_%H%M%S')}_{key}{lora_tag}")
+    bust_tag = ("" if a.bust == "default" else f"_bust-{a.bust}") + ("" if a.face == "default" else f"_face-{a.face}")
+    out = Path(f"outputs/{a.use}_style/{time.strftime('%Y%m%d_%H%M%S')}_{key}{lora_tag}{bust_tag}")
     neg = negative_for(key, photo)
     d = lm.MODELS[key]["defaults"]
-    print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {len(names)} 種寫法 × {len(skins)} 種膚質 × {len(seeds)} 顆 seed = "
+    print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {len(names)} 種寫法 × {len(skins)} 種膚質 × {len(poses)} 種姿勢 × {len(seeds)} 顆 seed = "
           f"{len(rows) * len(seeds)} 張 · {width}x{height} · steps {d.get('steps')} · guidance {d.get('guidance')} · "
-          f"{'照片風' if photo else '原風格句'} · 膚質 {','.join(skins)}")
+          f"{'照片風' if photo else '原風格句'} · 膚質 {','.join(skins)} · 身形 {a.bust} · 長相 {a.face} · 姿勢 {','.join(poses)}")
     print(f"== LoRA：{f'{a.lora}（強度 {a.lora_scale}）' if a.lora else '無'}")
     print(f"== 負面提示詞：{neg or '（蒸餾模型不吃）'}")
-    for n, sk, row in rows:
-        print(f"-- {row}：{build_prompt(VARIANTS[n], photo, sk)}")
+    for n, sk, po, row in rows:
+        print(f"-- {row}：{build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po)}")
     if a.dry_run:
         return
 
@@ -231,18 +297,19 @@ def main():
     model = lm.load(key, a.use, low_ram=a.low_ram, lora_paths=[lora_path] if lora_path else None,
                     lora_scales=[a.lora_scale] if lora_path else None)
     results, cells = [], {}
-    for n, sk, row in rows:
-        prompt = build_prompt(VARIANTS[n], photo, sk)
+    for n, sk, po, row in rows:
+        prompt = build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po)
         for seed in seeds:
             t1 = time.time()
             rec = dict(**lm.license_record(key), use=a.use, lora=a.lora, lora_scale=a.lora_scale if a.lora else None,
-                       photo_style=photo, skin=sk, variant=n, seed=seed, width=width, height=height, prompt=prompt,
+                       photo_style=photo, skin=sk, bust=a.bust, face=a.face, pose=po, variant=n, seed=seed, width=width, height=height, prompt=prompt,
                        negative_prompt=neg, steps=d.get("steps"), guidance=d.get("guidance"))
             try:
                 img = lm.generate(model, key, prompt=prompt, seed=seed, width=width, height=height,
                                   negative_prompt=neg)
                 idx = list(VARIANTS).index(n)
-                fname = f"{idx}_{seed}.png" if sk == "natural" else f"{idx}_{sk}_{seed}.png"
+                parts = [str(idx)] + ([] if sk == "natural" else [sk]) + ([] if po == "default" else [po]) + [str(seed)]
+                fname = "_".join(parts) + ".png"
                 path = lm.save(img, out / fname)
                 rec.update(ok=True, path=str(path), seconds=round(time.time() - t1, 1))
                 cells[(row, seed)] = rec
@@ -256,7 +323,7 @@ def main():
     lm.free()
     out.mkdir(parents=True, exist_ok=True)
     (out / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
-    sheet = contact_sheet(cells, [row for _, _, row in rows], seeds, out / "contact.jpg")
+    sheet = contact_sheet(cells, [row for *_, row in rows], seeds, out / "contact.jpg")
     print(f"\n== 完成 {(time.time() - t0) / 60:.0f} 分鐘 · 對照表 {sheet} · 紀錄 {out / 'results.json'}")
 
 

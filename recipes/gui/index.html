@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本機生圖</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 15px/1.6 -apple-system, "PingFang TC", "Hiragino Sans GB", sans-serif;
+         background: #141414; color: #eee; }
+  header { padding: 14px 20px; border-bottom: 1px solid #2a2a2a; display: flex; gap: 14px; align-items: baseline; }
+  header h1 { font-size: 17px; margin: 0; }
+  header span { color: #888; font-size: 13px; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 20px; padding: 20px; align-items: start; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .panel { background: #1c1c1c; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; }
+  label { display: block; margin: 12px 0 4px; font-size: 13px; color: #bbb; }
+  select, input[type=text], input[type=number], textarea {
+    width: 100%; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #333;
+    border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 14px; }
+  textarea { height: 120px; resize: vertical; color: #aaa; font-size: 12px; line-height: 1.5; }
+  button { margin-top: 14px; width: 100%; padding: 11px; font: inherit; font-weight: 600; border: 0;
+           border-radius: 8px; background: #3b7dd8; color: #fff; cursor: pointer; }
+  button:disabled { background: #333; color: #777; cursor: default; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .note { font-size: 12px; color: #777; margin-top: 6px; }
+  #status { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; background: #1c1c1c;
+            border: 1px solid #2a2a2a; font-size: 14px; }
+  #status.err { border-color: #8a3b3b; color: #ffb4b4; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .grid a { display: block; }
+  .grid img { width: 100%; border-radius: 8px; display: block; background: #222; }
+  .cap { font-size: 12px; color: #999; margin-top: 4px; }
+  #ref { font-size: 13px; }
+  #refPrev { max-width: 120px; border-radius: 6px; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>本機生圖</h1>
+  <span id="mem">只跑在這台 Mac，外面連不到</span>
+</header>
+<main>
+  <form class="panel" id="form">
+    <label>寫法</label>
+    <select id="variant"></select>
+
+    <label>模型</label>
+    <select id="model_id"></select>
+
+    <div class="row">
+      <div><label>膚色</label><select id="skin"></select></div>
+      <div><label>胸型</label><select id="bust"></select></div>
+    </div>
+    <div class="row">
+      <div><label>長相</label><select id="face"></select></div>
+      <div><label>姿勢</label><select id="pose"></select></div>
+    </div>
+
+    <label>尺寸</label>
+    <select id="size"></select>
+
+    <div class="row">
+      <div><label>張數</label><input type="number" id="count" value="1" min="1" max="8"></div>
+      <div><label>指定 seed（可留空）</label><input type="text" id="seeds" placeholder="例：314159, 271828"></div>
+    </div>
+
+    <label>參考圖（鎖臉，可不選）</label>
+    <input type="file" id="ref" accept="image/*">
+    <img id="refPrev" alt="參考圖預覽">
+    <div class="note">參考圖請用你自己的照片或這裡生成過的臉。放了參考圖會改用參考圖編輯模式，每張會變慢。</div>
+
+    <label>實際送出的 prompt</label>
+    <textarea id="prompt" readonly></textarea>
+
+    <button type="submit" id="go">生成</button>
+  </form>
+
+  <section>
+    <div id="status">待命中</div>
+    <div class="grid" id="grid"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let refData = null;
+
+function fill(sel, items, key = 'key', label = 'label') {
+  sel.innerHTML = items.map(i => typeof i === 'string'
+    ? `<option value="${i}">${i}</option>`
+    : `<option value="${i[key]}">${i[label]}</option>`).join('');
+}
+
+async function loadOptions() {
+  const o = await (await fetch('/api/options')).json();
+  fill($('variant'), o.variants);
+  fill($('model_id'), o.models, 'id');
+  fill($('skin'), o.skins);
+  fill($('bust'), o.busts);
+  fill($('face'), o.faces);
+  fill($('pose'), o.poses);
+  fill($('size'), o.sizes);
+  $('skin').value = o.default_skin;
+  refreshPrompt();
+}
+
+async function refreshPrompt() {
+  const r = await fetch('/api/prompt', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variant: $('variant').value, skin: $('skin').value, bust: $('bust').value,
+                           face: $('face').value, pose: $('pose').value, has_ref: !!refData })
+  });
+  const d = await r.json();
+  $('prompt').value = d.prompt || d.error || '';
+}
+
+['variant', 'skin', 'bust', 'face', 'pose'].forEach(id => $(id).addEventListener('change', refreshPrompt));
+
+$('ref').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) { refData = null; $('refPrev').style.display = 'none'; refreshPrompt(); return; }
+  const fr = new FileReader();
+  fr.onload = () => { refData = fr.result; $('refPrev').src = refData; $('refPrev').style.display = 'block'; refreshPrompt(); };
+  fr.readAsDataURL(f);
+});
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('go').disabled = true;
+  const body = { variant: $('variant').value, model_id: $('model_id').value, skin: $('skin').value,
+                 bust: $('bust').value, face: $('face').value, pose: $('pose').value, size: $('size').value,
+                 count: Number($('count').value), seeds: $('seeds').value, ref: refData };
+  const r = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                           body: JSON.stringify(body) });
+  const d = await r.json();
+  if (d.error) { $('status').textContent = d.error; $('status').className = 'err'; $('go').disabled = false; }
+});
+
+async function poll() {
+  const s = await (await fetch('/api/status')).json();
+  const mem = s.free_pct == null ? '' : `｜可用記憶體 ${s.free_pct}%`;
+  $('status').textContent = (s.error ? s.error : s.message) + (s.total ? `（${s.done}/${s.total}）` : '') + mem;
+  $('status').className = s.error ? 'err' : '';
+  $('go').disabled = s.running;
+  if (s.results && s.results.length) {
+    $('grid').innerHTML = s.results.map(r => `
+      <div><a href="${r.url}" target="_blank"><img src="${r.url}" loading="lazy"></a>
+      <div class="cap">seed ${r.seed}・${r.seconds}秒・${r.variant}</div></div>`).join('');
+  }
+  setTimeout(poll, 1500);
+}
+
+loadOptions();
+poll();
+</script>
+</body>
+</html>
