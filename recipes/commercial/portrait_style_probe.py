@@ -74,6 +74,29 @@ VARIANTS = {
               "her weight on one leg, one knee slightly bent. "),
         identity="A 24-year-old woman with a slim figure, present-day fashion. ",
         extra=EXPRESSION),
+
+    # 男士正裝（2026-09-16 使用者要男士西裝選項）
+    "男士商務正裝西裝": dict(
+        gender="male",
+        style=STYLE.replace("soft cinematic key light", "refined cinematic studio portrait lighting with subtle rim light")
+                   .replace("head-and-shoulders framing", "full-length framing from head to toe"),
+        clothing=("He wears an impeccably tailored charcoal-grey bespoke wool suit with sharp notch lapels, "
+                  "a crisp pressed white dress shirt, a deep navy silk necktie, a folded white pocket square, "
+                  "matching tailored trousers, and polished black leather oxford shoes. "),
+        body=("Broad athletic shoulders, a straight upright posture, and a fit masculine physique. "
+              "He stands with hands casually resting near his suit pockets in a confident stance. "),
+        identity="A 28-year-old handsome man with a sophisticated, professional aura. ",
+        extra="A calm, confident gaze straight at the camera, with a subtle determined expression. "),
+
+    "男士雅痞休閒西裝": dict(
+        gender="male",
+        style=STYLE.replace("soft cinematic key light", "warm soft natural window daylight, modern architectural background")
+                   .replace("head-and-shoulders framing", "three-quarter framing from the knees up"),
+        clothing=("He wears a modern unconstructed navy blue blazer over an open-collar crisp white shirt "
+                  "(no tie), paired with slim tailored trousers, a brown leather belt, and a luxury minimalist wristwatch. "),
+        body=("Broad masculine shoulders, a fit athletic build, standing comfortably with an easy, relaxed posture. "),
+        identity="A 28-year-old charismatic handsome man, stylish modern smart-casual tailoring. ",
+        extra="A relaxed charming expression, subtle confident smile, sharp engaging eyes looking at the viewer. "),
 }
 
 BUILTIN_VARIANTS = tuple(VARIANTS)  # 內建（進版控）的寫法名稱，要在載入本機寫法之前記下來
@@ -175,6 +198,18 @@ FACE_PRESETS = {
                      hair=("Her dark-blonde hair is gathered into a sleek high ponytail at the crown of her head, "
                            "with a few soft delicate strands framing her temples. "),
                      ethnic=None),
+    "east_asian_male": dict(
+        label="東亞男性・俐落短髮",
+        gender="male",
+        face="A handsome young East Asian man with clean sharp facial contours, a strong jawline, and clear expressive eyes. ",
+        hair="His clean short black hair is neatly groomed and styled, short on the sides with subtle modern texture. ",
+        ethnic="He is a young East Asian man with East Asian features. "),
+    "gentleman_fade": dict(
+        label="型男・側分油頭",
+        gender="male",
+        face="A handsome man with sharp masculine features, high cheekbones, strong jawline, and charismatic direct gaze. ",
+        hair="His dark hair is neatly styled into a classic side-part pompadour with a clean fade along the sides. ",
+        ethnic=None),
 }
 BUST_PRESETS = {
     "default": "",
@@ -185,13 +220,10 @@ BUST_PRESETS = {
              "pronounced round upper curve and a strong lift. "),
 }
 # 參考圖鎖臉（GUI 上傳參考圖時用）。2026-09-16 實測：照原本的寫法接一句「臉要跟參考圖一樣」沒有用，
-# 髮色、五官都跑掉——因為 prompt 裡本來就有髮型句（栗色盤髮）、五官句、膚色句，字面描述會蓋過參考圖。
-# 所以有參考圖時直接不寫這幾句，長相全部交給參考圖，只留風格、服裝、身形。
-# 用 FLUX.2 編輯版慣用的「image 1」講法（travel_with_me.build_prompt 也是這樣寫），比「the reference image」明確。
+# 一定要開頭結尾夾攻＋把會衝突的五官／膚色／髮型全部拿掉，只留族裔。
 REF_LEAD = "A photo of the exact same woman as the person shown in image 1, the same face and the same hair. "
 REF_TAIL = ("Keep her face, face shape, eyes, eyebrows, nose, mouth, hair colour, hairstyle, skin tone and age "
-            "identical to the person in image 1. Real camera photo, natural light, sharp focus on the face, "
-            "bright clear eyes with crisp catchlights.")
+            "completely identical to image 1. Natural candid pose, real camera photo, natural lighting, sharp focus.")
 DEFAULT_SKIN = {"commercial": "clean", "personal": "fair"}
 SKIN_PRESETS = {
     "natural": dict(label="自然紋理", lead="Photorealistic portrait photograph, natural skin texture", skin=SKIN),
@@ -222,6 +254,8 @@ def build_prompt(v, photo=False, skin="clean", bust="default", face="default", p
     # LESSONS §1 的段落順序：風格 → 服裝 → 髮型 → 身形 → 身分 → 臉 → 神情 → 膚質
     preset = SKIN_PRESETS[skin]
     fp = FACE_PRESETS[face]
+    is_male = (v.get("gender") == "male") or (fp.get("gender") == "male")
+
     style = v["style"].replace(PAINTED_LEAD, preset["lead"]) if photo else v["style"]
     for old, new in preset.get("style_swaps", ()):
         style = style.replace(old, new)
@@ -232,22 +266,34 @@ def build_prompt(v, photo=False, skin="clean", bust="default", face="default", p
             style += text[0].upper() + text[1:] + ". "
     body, clothing = v["body"], v["clothing"]
     if framing in _CLOSE_FRAMINGS:
-        # 取景拉近時，描述腿腳鞋的句子要一起拿掉，否則模型會為了把腿放進畫面而退遠拍全身
         clothing = _drop_leg_clauses(clothing)
         body = _drop_leg_clauses(body)
         style = style.replace(" across her bare shoulders and legs", " across her bare shoulders")
     if pose != "default":
-        # 換姿勢時先拿掉原本的站姿句（各寫法的句尾不一定一樣，用整句比對會漏掉），避免兩個姿勢並存
-        body = re.sub(r"She stands with her weight on one leg[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
+        body = re.sub(r"(She stands with her weight on one leg|He stands with hands casually resting near his suit pockets|He stands comfortably)[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
+
+    bust_clause = "" if is_male else BUST_PRESETS[bust]
+
     if ref:
-        # 長相交給參考圖：髮型、五官、身分、膚色句全部不寫（會蓋過參考圖）。只留族裔短句，
-        # 因為 prompt 不寫族裔時模型會照自己的預設畫歐美臉，光靠參考圖拉不回來。
-        return (REF_LEAD + (fp.get("ethnic") or "") + style + clothing + body + BUST_PRESETS[bust]
-                + v["extra"] + REF_TAIL)
-    # 族裔與預設身分句（里斯本製圖師的女兒）會打架，選了族裔就換成不指出身的身分句
-    identity = v.get("identity") or (NEUTRAL_IDENTITY if fp.get("ethnic") else IDENTITY)
-    return (style + clothing + (fp["hair"] or HAIR) + body + BUST_PRESETS[bust]
-            + identity + (fp["face"] or FACE) + v["extra"] + preset["skin"])
+        ref_lead = "A photo of the exact same person as shown in image 1, identical face and hair. "
+        ref_tail = ("Keep face shape, eyes, eyebrows, nose, mouth, hair colour, hairstyle, skin tone and age "
+                    "completely identical to image 1. Natural candid pose, real camera photo, natural lighting, sharp focus.")
+        return (ref_lead + (fp.get("ethnic") or "") + style + clothing + body + bust_clause
+                + v["extra"] + ref_tail)
+
+    if is_male:
+        hair_clause = fp["hair"] or "His dark hair is cleanly cut and neatly groomed, short on the sides. "
+        face_clause = fp["face"] or "A handsome masculine face with sharp features and a strong jawline. "
+        identity = v.get("identity") or ("He is a handsome 28-year-old East Asian man. " if fp.get("ethnic") else "A handsome 28-year-old man. ")
+        skin_clause = preset["skin"].replace("beautiful appealing features", "handsome appealing features")
+    else:
+        hair_clause = fp["hair"] or HAIR
+        face_clause = fp["face"] or FACE
+        identity = v.get("identity") or (NEUTRAL_IDENTITY if fp.get("ethnic") else IDENTITY)
+        skin_clause = preset["skin"]
+
+    return (style + clothing + hair_clause + body + bust_clause
+            + identity + face_clause + v["extra"] + skin_clause)
 
 
 def negative_for(key, photo):
