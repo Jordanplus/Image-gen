@@ -4,7 +4,7 @@
 # 尤其要讓後端 uvicorn 的 PATH 含 /opt/homebrew/bin，server.py 的 subprocess 才找得到 claude。
 set -u
 
-REPO="/Users/mcgradymac/claude_prjs/Image-gen/cloud"
+REPO="/Users/mcgradymac/Gemini/Image-gen/cloud"
 PORT=8765
 VENV="$REPO/.venv"
 TOKFILE="$REPO/.app_token"

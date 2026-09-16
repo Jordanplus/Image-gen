@@ -2,7 +2,7 @@
 -- 雙擊 → 自動啟動後端 + 確認 Funnel → 顯示狀態/網址/token，可停止、複製網址。
 -- 編譯：osacompile -o ~/Desktop/ImageGen.app ImageGen.applescript
 
-property ctlScript : "/Users/mcgradymac/claude_prjs/Image-gen/cloud/launcher/imagegen-ctl.sh"
+property ctlScript : "/Users/mcgradymac/Gemini/Image-gen/cloud/launcher/imagegen-ctl.sh"
 
 on runCtl(cmd)
 	try

@@ -48,7 +48,6 @@ UPSCALE_MAX_SCALE = 2.0
 # 介面上的模型選單（model 對應 local_models.MODELS；lora 為 None 代表不掛外掛）
 MODELS = [
     dict(id="klein-9b", label="klein-9B（寫實、約 90 秒）", model="klein-9b", use="personal", lora=None),
-    dict(id="klein-4b", label="klein-4B（快，約 65 秒）", model="klein-4b", use="personal", lora=None),
 ]
 
 # 不進版控的本機模型設定（repo 是公開的）：同資料夾放 models_local.py，定義 EXTRA_MODELS = [dict(id=..., label=...,
@@ -118,13 +117,8 @@ def get_model(model_key, use, lora, edit):
 
 
 def prompt_for(job, has_ref):
-    """組 prompt；有參考圖就換成鎖臉寫法（膚色／長相選項此時不生效，由參考圖決定）。
-
-    參考圖鎖臉只開放內建寫法：本機另外載入的寫法不走這條路。
-    """
+    """組 prompt；有參考圖就換成鎖臉寫法（膚色／長相選項此時不生效，由參考圖決定）。"""
     name = job["variant"]
-    if has_ref and name not in probe.BUILTIN_VARIANTS:
-        raise ValueError("這個寫法不支援參考圖鎖臉，請改用內建的寫法，或把參考圖清掉")
     return probe.build_prompt(probe.VARIANTS[name], True, job["skin"], job["bust"], job["face"], job["pose"],
                               ref=has_ref, framing=job.get("framing", "default"))
 
@@ -198,7 +192,7 @@ def upscale_resolution(w, h):
 
 
 def run_upscale(src_rel):
-    """把介面產出的某一張用 SeedVR2 放大（長邊 UPSCALE_SIDE）。"""
+    """把介面產出的某一張用 SUPIR 進行超解析度修復與放大 2x。"""
     try:
         root = OUT_ROOT.resolve()
         src = Path(src_rel).resolve()
@@ -207,26 +201,61 @@ def run_upscale(src_rel):
         pct = free_pct()
         if pct is not None and pct < MIN_FREE_PCT:
             raise RuntimeError(f"可用記憶體只剩 {pct}%，先關掉一些程式再放大")
-        # SeedVR2 要 6.8GB，先把常駐的生圖模型放掉（下一張生成會重新載入，多花 30–60 秒）
-        _set(message="放掉生圖模型，載入放大模型…")
+
+        # 先把常駐的生圖模型釋放，釋放 RAM 給 SUPIR
+        _set(message="釋放生圖模型，準備 SUPIR 放大…")
         _loaded.update(key=None, model=None)
         lm.free()
+
         from PIL import Image
         with Image.open(src) as im:
-            resolution, target = upscale_resolution(*im.size)
+            orig_w, orig_h = im.size
+
+        supir_py = ROOT / "venv" / "bin" / "python"
+        supir_runner = ROOT / "recipes" / "upscale_supir.py"
+        dst = src.with_name(f"{src.stem}_supir_2x.png")
+
+        _set(message="啟動 SUPIR 放大引擎…")
         t0 = time.time()
-        model = lm.load("seedvr2-3b", "personal", quantize=None, low_ram=True, single_run=True)
-        _set(message=f"放大中（目標 {target[0]}×{target[1]}）…")
-        img = lm.to_pil(model.generate_image(seed=0, image_path=str(src), resolution=resolution)).convert("RGB")
-        model = None
-        lm.free()
-        dst = lm.save(img, src.with_name(f"{src.stem}_x{img.size[0]}.png"))
+        cmd = [
+            str(supir_py),
+            str(supir_runner),
+            str(src),
+            "--scale", "2.0",
+            "--output", str(dst),
+        ]
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        while proc.poll() is None:
+            time.sleep(2)
+            elapsed = int(time.time() - t0)
+            _set(message=f"SUPIR 重建修復與放大中（已耗時 {elapsed} 秒）…")
+
+        ret = proc.returncode
+        stdout, _ = proc.communicate()
+        if ret != 0 or not dst.exists():
+            raise RuntimeError(f"SUPIR 放大失敗 (code {ret}): {(stdout or '')[-300:]}")
+
+        with Image.open(dst) as up_im:
+            up_w, up_h = up_im.size
+
         url = f"/outputs/{dst.relative_to(Path('outputs').resolve())}"
         with _lock:
             for r in _state["results"]:
                 if Path(r["path"]).resolve() == src:
-                    r.update(up_url=url, up_size=f"{img.size[0]}×{img.size[1]}")
-        _set(message=f"放大完成 {img.size[0]}×{img.size[1]}（{time.time() - t0:.0f} 秒）")
+                    r.update(up_url=url, up_size=f"{up_w}×{up_h}")
+        _set(message=f"SUPIR 放大完成 {up_w}×{up_h}（{time.time() - t0:.0f} 秒）")
     except Exception as ex:  # noqa: BLE001
         _set(message="放大失敗", error=f"{type(ex).__name__}: {ex}")
     finally:

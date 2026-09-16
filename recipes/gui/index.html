@@ -180,7 +180,7 @@ function renderGrid(results, running) {
       <div class="cap">seed ${r.seed}・${r.seconds}秒・${r.pose_label ? r.pose_label + '・' : ''}${r.variant}</div>
       ${r.up_url
         ? `<a class="up" href="${r.up_url}" target="_blank">已放大 ${r.up_size} ↗</a>`
-        : `<button type="button" class="up" data-path="${r.path}"${running ? ' disabled' : ''}>放大（約 2 倍）</button>`}
+        : `<button type="button" class="up" data-path="${r.path}"${running ? ' disabled' : ''}>🔍 SUPIR 放大 (2x)</button>`}
     </div>`).join('');
   if (html !== lastGrid) { lastGrid = html; $('grid').innerHTML = html; }
 }
@@ -191,7 +191,7 @@ $('grid').addEventListener('click', async e => {
   const btn = e.target.closest('button.up');
   if (!btn) return;
   btn.disabled = true;
-  btn.textContent = '放大中…';
+  btn.textContent = 'SUPIR 放大中…';
   const r = await fetch('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                           body: JSON.stringify({ path: btn.dataset.path }) });
   const d = await r.json();

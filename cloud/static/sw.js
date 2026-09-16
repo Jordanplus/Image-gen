@@ -1,8 +1,8 @@
 // 最小 service worker：讓 PWA 可安裝（獨立視窗/圖示）+ app shell 離線可開。
 // 注意：Service Worker 只在安全來源（HTTPS 或 localhost）註冊；
 // Tailscale 純 http IP 不算安全來源 → 用 Funnel/`tailscale serve` 或 Cloudflare Tunnel 提供 HTTPS。
-const CACHE = 'imagegen-v4';  // v4: 模型選項改 gpt-image-2.5 Sunburst/Flare（v3: 加「本地 4B·免額度」）
-
+const CACHE = 'imagegen-v7-facelock';  // v7: 支援本地 9B 參考圖鎖臉編輯
+ 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest'])));
   self.skipWaiting();
@@ -18,7 +18,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
   // API 與產出圖一律走網路（不快取，避免拿到舊結果）
-  if (u.pathname.startsWith('/generate') || u.pathname.startsWith('/img/')) return;
+  if (u.pathname.startsWith('/generate') || u.pathname.startsWith('/upscale') || u.pathname.startsWith('/img/')) return;
   // 頁面（index.html）：network-first → 線上永遠拿最新 UI，離線退回快取
   if (e.request.mode === 'navigate' || u.pathname === '/') {
     e.respondWith(

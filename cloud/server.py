@@ -37,10 +37,10 @@ OUT_DIR.mkdir(exist_ok=True)
 # worker 用 mflux 的 venv 跑（與 server 的 .venv 隔離），server 只透過本機 HTTP 溝通。
 MFLUX_PY = os.path.expanduser("~/.local/share/uv/tools/mflux/bin/python")
 KLEIN_WORKER = str(HERE / "klein_worker.py")
-KLEIN_PORT = int(os.environ.get("KLEIN_PORT", "8770"))
+KLEIN_PORT = int(os.environ.get("KLEIN_PORT", "8772"))
 KLEIN_URL = f"http://127.0.0.1:{KLEIN_PORT}"
 KLEIN_IDLE = os.environ.get("KLEIN_IDLE", "600")  # 閒置幾秒後 worker 自我結束
-LOCAL_MODELS = {"local/flux2-klein-4b"}           # 手機下拉用這個 value 走本地
+LOCAL_MODELS = {"local/flux2-klein-9b"}           # 手機下拉用這個 value 走本地
 
 # ── 圖像模型 → 寫 prompt 時要對齊的目標 ────────────────────────────────────────
 # 不同家族吃的 prompt 風格不同，寫 prompt 的 system 指令要跟著手機上選到的模型走，
@@ -68,13 +68,19 @@ PROMPT_TARGETS = {
         "Nano Banana 2 (gemini-3.1-flash-image)",
         "It reads prompts as natural language and is the fast tier, so keep to one "
         "clearly described scene in plain sentences rather than a keyword list."),
-    "local/flux2-klein-4b": (
-        "FLUX.2 klein-4B",
-        "It is a small distilled model, so keep one clear subject with concrete visual "
-        "detail and avoid multi-part or conditional instructions."),
+    "local/flux2-klein-9b": (
+        "FLUX.2 klein-9B",
+        "It is a high-fidelity distilled model with reference image editing capability. "
+        "When reference images are provided, call them image 1, image 2... and explicitly state: "
+        "'Keep the person\'s face, identity, facial features, skin tone, and hairstyle identical to the reference photo.' "
+        "Describe the scene and lighting with concrete visual details."),
 }
-# prompt 字數上限：2.5 要寫參考圖角色與保留項，80 字太緊（官方範例 50–200 多字）；其餘維持 80。
-PROMPT_MAX_WORDS = {"openai/gpt-image-2.5-sunburst": 120, "openai/gpt-image-2.5-flare": 120}
+# prompt 字數上限：2.5/9B 要寫參考圖角色與保留項，80 字太緊；其餘維持 80。
+PROMPT_MAX_WORDS = {
+    "openai/gpt-image-2.5-sunburst": 120,
+    "openai/gpt-image-2.5-flare": 120,
+    "local/flux2-klein-9b": 120,
+}
 
 _worker_proc = None
 _worker_lock = threading.Lock()
@@ -282,7 +288,8 @@ def generate(
             def _work_local():
                 try:
                     payload = json.dumps({"prompt": prompt, "width": w, "height": h,
-                                          "steps": 6, "guidance": 1.0, "out_name": out_name}).encode()
+                                          "steps": 4, "guidance": 1.0, "images": ref_paths,
+                                          "out_name": out_name}).encode()
                     rq = urllib.request.Request(f"{KLEIN_URL}/generate", data=payload,
                                                 headers={"Content-Type": "application/json"})
                     with urllib.request.urlopen(rq, timeout=900) as r:
@@ -347,6 +354,117 @@ def generate(
     # X-Accel-Buffering:no → 提示代理別緩衝；application/x-ndjson 逐行串流
     return StreamingResponse(stream(), media_type="application/x-ndjson",
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+REPO_ROOT = HERE.parent
+SUPIR_PY = REPO_ROOT / "venv" / "bin" / "python"
+SUPIR_RUNNER = REPO_ROOT / "recipes" / "upscale_supir.py"
+
+
+@app.post("/upscale")
+def upscale(
+    image_url: str = Form(None),
+    scale: float = Form(2.0),
+    prompt: str = Form(""),
+    file: UploadFile = File(None),
+    x_app_token: str = Header(default=""),
+):
+    """使用本地 SUPIR (ComfyUI Core native + SDXL Lightning) 進行影像超解析度修復與放大。
+
+    支援：
+      1. 手機剛生成的圖片（傳入 image_url，如 /img/out_xxx.png）
+      2. 使用者直接從手機相簿上傳的圖片（傳入 file）
+
+    回傳串流 NDJSON 保活心跳：
+      {"stage": "init", "message": "準備 SUPIR 放大引擎..."}
+      {"stage": "upscaling", "waited": N, "message": "SUPIR 正在修復細節並放大中..."}
+      {"stage": "done", "ok": True, "image_url": "/img/supir_xxx.png", "scale": scale}
+    """
+    if APP_TOKEN and x_app_token != APP_TOKEN:
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+
+    input_path = None
+    if file and getattr(file, "filename", None):
+        ext = Path(file.filename).suffix or ".png"
+        input_path = OUT_DIR / f"supir_in_{uuid.uuid4().hex}{ext}"
+        input_path.write_bytes(file.file.read())
+    elif image_url:
+        name = image_url.split("?")[0].rstrip("/").split("/")[-1]
+        local_p = OUT_DIR / name
+        if local_p.exists() and local_p.is_file():
+            input_path = local_p
+        else:
+            try:
+                input_path = OUT_DIR / f"supir_in_{uuid.uuid4().hex}.png"
+                urllib.request.urlretrieve(image_url, input_path)
+            except Exception as e:
+                return JSONResponse({"ok": False, "error": f"無法取得來源圖片: {e}"}, status_code=400)
+    else:
+        return JSONResponse({"ok": False, "error": "未提供圖片 (image_url 或 file)"}, status_code=400)
+
+    out_name = f"supir_{uuid.uuid4().hex}.png"
+    out_path = OUT_DIR / out_name
+
+    def ev(d):
+        return json.dumps(d, ensure_ascii=False) + "\n"
+
+    def stream():
+        yield ev({"stage": "init", "message": "已接收圖片，正在啟動 SUPIR 放大引擎…"})
+        cmd = [
+            str(SUPIR_PY),
+            str(SUPIR_RUNNER),
+            str(input_path),
+            "--scale",
+            str(scale),
+            "--output",
+            str(out_path),
+        ]
+        if prompt.strip():
+            cmd.extend(["--prompt", prompt.strip()])
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO_ROOT),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        waited = 0
+        while proc.poll() is None:
+            time.sleep(3)
+            waited += 3
+            yield ev({
+                "stage": "upscaling",
+                "waited": waited,
+                "message": f"SUPIR 正在修復細節與放大（已進行 {waited} 秒）…",
+            })
+
+        ret = proc.returncode
+        stdout, _ = proc.communicate()
+        if ret != 0 or not out_path.exists():
+            err_msg = (stdout or "SUPIR 處理異常")[-300:]
+            yield ev({"stage": "error", "error": f"放大失敗 (code {ret}): {err_msg}"})
+            return
+
+        yield ev({
+            "stage": "done",
+            "ok": True,
+            "image_url": f"/img/{out_name}",
+            "scale": scale,
+            "seconds": waited,
+        })
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 # 產出圖以 /img/<name> 取回；PWA 靜態檔掛在根目錄（html=True → 根路徑回 index.html）。
