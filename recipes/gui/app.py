@@ -47,7 +47,7 @@ UPSCALE_MAX_SCALE = 2.0
 
 # 介面上的模型選單（model 對應 local_models.MODELS；lora 為 None 代表不掛外掛）
 MODELS = [
-    dict(id="klein-9b", label="klein-9B（寫實、約 90 秒）", model="klein-9b", use="personal", lora=None),
+    dict(id="klein-9b", label="klein-9B（標準）", model="klein-9b", use="personal", lora=None),
 ]
 
 # 不進版控的本機模型設定（repo 是公開的）：同資料夾放 models_local.py，定義 EXTRA_MODELS = [dict(id=..., label=...,
