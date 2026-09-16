@@ -14,12 +14,34 @@ from pathlib import Path
 
 USES = ("commercial", "personal")
 
+
+def total_ram_gb():
+    """取得系統實體記憶體容量（GB）。32GB 機器可開 8-bit 與 1024 解析度，24GB 維持 4-bit 與記憶體防線。"""
+    try:
+        import subprocess
+        out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=3).stdout.strip()
+        return int(out) / (1024 ** 3)
+    except Exception:
+        return 16.0
+
+
 MODELS = {
+    "klein-9b": dict(
+        kind="flux2", config="flux2_klein_9b", repo="black-forest-labs/FLUX.2-klein-9B",
+        license="FLUX Non-Commercial License v2.1", commercial=False, distilled=True,
+        defaults=dict(steps=4, guidance=1.0),
+        note="主力旗艦模型；32GB M5 建議 8-bit（quantize=8）畫質極高，24GB 機器用 4-bit"),
+    "klein-9b-uncensored": dict(
+        kind="flux2", config="flux2_klein_9b", repo="black-forest-labs/FLUX.2-klein-9B",
+        license="FLUX Non-Commercial License v2.1", commercial=False, distilled=True,
+        defaults=dict(steps=4, guidance=1.0), uncensored=True,
+        text_encoder_repo="darknight9121/FLUX.2-klein-base-9B-bucket-uncensored",
+        note="FLUX.2-klein-9B 掛載社群無審查 Text Encoder，解除提示詞審查限制"),
     "klein-4b": dict(
         kind="flux2", config="flux2_klein_4b", repo="black-forest-labs/FLUX.2-klein-4B",
         license="Apache-2.0", commercial=True, distilled=True,
         defaults=dict(steps=6, guidance=1.0),
-        note="現行立繪主力；蒸餾版，guidance 固定 1.0、負面提示詞不生效"),
+        note="前代 4B 立繪模型；蒸餾版，guidance 固定 1.0、負面提示詞不生效"),
     "klein-base-4b": dict(
         kind="flux2", config="flux2_klein_base_4b", repo="black-forest-labs/FLUX.2-klein-base-4B",
         license="Apache-2.0", commercial=True, distilled=False,
@@ -48,11 +70,6 @@ MODELS = {
         defaults=dict(steps=25, guidance=3.5),
         note="非蒸餾，20B＋7B 視覺語言編碼器；用 mlx-community 預先量化的 4-bit 版（原版約 58GB）；"
              "預設沿用 2026-06 場景圖設定（25 步、guidance 3.5，1152×768 約 270–340 秒）"),
-    "klein-9b": dict(
-        kind="flux2", config="flux2_klein_9b", repo="black-forest-labs/FLUX.2-klein-9B",
-        license="FLUX Non-Commercial License v2.1", commercial=False, distilled=True,
-        defaults=dict(steps=4, guidance=1.0),
-        note="只限個人用途；多參考圖編輯品質高，24GB 機器會用到 swap"),
     "seedvr2-3b": dict(
         kind="seedvr2", config="seedvr2_3b", repo="numz/SeedVR2_comfyUI",
         license="Apache-2.0", commercial=True, distilled=None,
@@ -85,12 +102,55 @@ def _ensure_hf_env():
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     if os.environ.get("HF_TOKEN"):
         return
-    # gated 模型（如 klein-9B）需要金鑰；只從檔案讀進環境變數，不印出。
-    f = Path(os.environ.get("HF_TOKEN_FILE", Path.home() / "claude_prjs" / "Higgingface.env"))
-    if f.is_file():
-        m = re.search(r"hf_[A-Za-z0-9]{20,}", f.read_text(errors="ignore"))
-        if m:
-            os.environ["HF_TOKEN"] = m.group(0)
+    # gated 模型（如 klein-9B）需要金鑰；依序檢查常用金鑰檔，不印出。
+    candidates = [
+        os.environ.get("HF_TOKEN_FILE"),
+        Path.home() / "claude" / "api.env",
+        Path.home() / "claude_prjs" / "Higgingface.env",
+        Path.home() / ".cache" / "huggingface" / "token",
+    ]
+    for c in candidates:
+        if c and Path(c).is_file():
+            m = re.search(r"hf_[A-Za-z0-9]{20,}", Path(c).read_text(errors="ignore"))
+            if m:
+                os.environ["HF_TOKEN"] = m.group(0)
+                break
+
+
+def _load_text_encoder_weights(spec=None):
+    """載入並映射無審查或自訂 Text Encoder 權重（Qwen3TextEncoder 結構）。
+    spec 可為：
+      - 本機 .safetensors 檔案或目錄
+      - HF repo ID（例如 darknight9121/FLUX.2-klein-base-9B-bucket-uncensored）
+    """
+    _ensure_hf_env()
+    import mlx.core as mx
+    from mflux.models.flux2.weights.flux2_weight_mapping import Flux2WeightMapping
+    from mflux.models.common.weights.mapping.weight_mapper import WeightMapper
+    from mflux.models.common.weights.loading.weight_loader import WeightLoader
+    from huggingface_hub import hf_hub_download
+
+    spec = spec or "darknight9121/FLUX.2-klein-base-9B-bucket-uncensored"
+    p = Path(spec).expanduser() if spec else None
+    if p and p.exists():
+        if p.is_dir():
+            if (p / "model.safetensors.index.json").exists():
+                raw = WeightLoader._load_safetensors(p, "multi_json")
+            else:
+                raw = WeightLoader._load_safetensors(p, "mlx_native")
+        else:
+            raw = dict(mx.load(str(p)).items())
+    else:
+        filename = "text_encoder/model.safetensors" if "bucket" in spec else "model.safetensors"
+        token = os.environ.get("HF_TOKEN")
+        dl_path = hf_hub_download(repo_id=spec, filename=filename, token=token)
+        raw = dict(mx.load(str(dl_path)).items())
+
+    mapped = WeightMapper.apply_mapping(
+        hf_weights=raw,
+        mapping=Flux2WeightMapping.get_text_encoder_mapping(),
+    )
+    return mapped
 
 
 def _with_negative(base_cls):
@@ -142,13 +202,18 @@ def _patch_mlx_repeat():
 
 
 def _register_memory_saver(model, *, low_ram, single_run):
-    """照 mflux 命令列（callbacks/callback_manager.py）的做法掛上 MemorySaver。
+    """掛上 MemorySaver。
 
-    直接呼叫 python API 不會有這一步，文字編碼器整段生成期間都佔著記憶體（mflux 註解：浪費 8–12GB）。
-    single_run=True：只生一張 → 編碼完就把文字編碼器移出記憶體；FLUX.2 每次生成都會重新編碼，所以要連續生多張時不能移。
-    low_ram=True：再加 MLX 快取上限 1GB 與 VAE 分塊解碼（等同命令列 --low-ram）。
+    注意：在 32GB 機器（M5 等）或需要常駐生成的場合，若 single_run=False 且非強制 low_ram，
+    不掛載 MemorySaver，避免它在第 1 步把 text_encoder 刪掉（mflux 實作：self.model.text_encoder = None），
+    導致常駐模型後續無法用不同 prompt 生圖。24GB 機器上或單張命令列時仍正常掛載。
     """
     if not hasattr(model, "callbacks"):
+        return
+    # 32GB 機器若不是強制 low_ram，不註冊 MemorySaver 以保留模型在記憶體中常駐重用
+    if total_ram_gb() >= 30 and not low_ram and not single_run:
+        return
+    if not single_run and not low_ram:
         return
     from mflux.callbacks.instances.memory_saver import MemorySaver
     model.callbacks.register(MemorySaver(model=model, keep_transformer=True,
@@ -156,19 +221,49 @@ def _register_memory_saver(model, *, low_ram, single_run):
                                          num_seeds=1 if single_run else 2))
 
 
-def load(key, use, quantize=4, edit=False, low_ram=False, single_run=False, lora_paths=None, lora_scales=None):
+def load(key, use, quantize=None, edit=False, low_ram=False, single_run=False,
+         lora_paths=None, lora_scales=None, text_encoder_path=None):
     """依用途把關後載入模型。edit=True 載 FLUX.2 的參考圖編輯版；low_ram／single_run 見 _register_memory_saver。
-    lora_paths：本機檔案或 mflux 認得的 HF 路徑 org/repo:檔名（FLUX.2 支援一般 LoRA 與 LyCORIS LoKr）；接 FLUX.2 與 Z-Image。"""
+    lora_paths：本機檔案或 mflux 認得的 HF 路徑 org/repo:檔名（FLUX.2 支援一般 LoRA 與 LyCORIS LoKr）；接 FLUX.2 與 Z-Image。
+    text_encoder_path：自訂或無審查 Text Encoder（本機 safetensors 或 HF repo）。
+    32GB 機器預設採 quantize=8（完全消除 4-bit 引起的色塊與眼周微變形），24GB 機器預設 4-bit。"""
     m = require(key, use)
     _ensure_hf_env()
+    if quantize is None:
+        quantize = 8 if total_ram_gb() >= 30 else 4
     from mflux.models.common.config import ModelConfig
     cfg = getattr(ModelConfig, m["config"])()
     if lora_paths and m["kind"] not in ("flux2", "z_image"):
         raise SystemExit(f"✗ {key} 這裡還沒接 LoRA（目前只接 FLUX.2、Z-Image）")
     if m["kind"] == "flux2":
+        custom_te = text_encoder_path or (m.get("text_encoder_repo") if m.get("uncensored") else None)
         from mflux.models.flux2.variants import Flux2Klein, Flux2KleinEdit
-        model = _with_negative(Flux2KleinEdit if edit else Flux2Klein)(
-            quantize=quantize, model_config=cfg, lora_paths=lora_paths, lora_scales=lora_scales)
+        cls = Flux2KleinEdit if edit else Flux2Klein
+
+        if custom_te:
+            from mflux.models.flux2.flux2_initializer import Flux2Initializer
+            orig_load_weights = Flux2Initializer._load_weights
+
+            def hooked_load_weights(model_path):
+                weights = orig_load_weights(model_path)
+                try:
+                    print(f"⚡ 正在掛載無審查／自訂 Text Encoder: {custom_te}...", flush=True)
+                    te_weights = _load_text_encoder_weights(custom_te)
+                    weights.components["text_encoder"] = te_weights
+                    print("✓ 無審查 Text Encoder 掛載成功", flush=True)
+                except Exception as e:
+                    print(f"⚠️ 無審查 Text Encoder 掛載失敗 ({e})，自動使用預設 Text Encoder", flush=True)
+                return weights
+
+            Flux2Initializer._load_weights = hooked_load_weights
+            try:
+                model = _with_negative(cls)(
+                    quantize=quantize, model_config=cfg, lora_paths=lora_paths, lora_scales=lora_scales)
+            finally:
+                Flux2Initializer._load_weights = orig_load_weights
+        else:
+            model = _with_negative(cls)(
+                quantize=quantize, model_config=cfg, lora_paths=lora_paths, lora_scales=lora_scales)
     elif edit:
         raise SystemExit(f"✗ {key} 不支援參考圖編輯")
     elif m["kind"] == "z_image":

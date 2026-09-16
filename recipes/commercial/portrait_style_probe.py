@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import local_models as lm  # noqa: E402
 
-MODEL = "klein-4b"
+MODEL = "klein-9b"
 STYLE = ("Semi-realistic painted character portrait for a historical strategy game, "
          "soft cinematic key light, muted warm palette, head-and-shoulders framing, plain dark backdrop. ")
 HAIR = "Her chestnut hair is pinned up at the back of the head, a few loose strands at the temples. "
@@ -54,7 +54,7 @@ VARIANTS = {
                   "at the front cut low across the chest, showing her décolletage and the upper curve of her bust. "),
         body="Bare smooth shoulders and collarbones, a narrow cinched waist and a full bust. ",
         extra=EXPRESSION),
-    # 全身照（2026-09-15 使用者要「全身照，要有美腿的」）：直式尺寸建議 704x1216。
+    # 全身照（2026-09-15 使用者要「全身照，要有美腿的」）：直式尺寸建議 704x1216 或 1024x1536。
     "全身＋美腿": dict(
         style=STYLE.replace("soft cinematic key light", "warm soft window light across her bare shoulders and legs")
                    .replace("head-and-shoulders framing", "full-length framing from head to toe"),
@@ -64,7 +64,7 @@ VARIANTS = {
         body=("Bare smooth shoulders, a narrow cinched waist, a full bust, and long slender shapely legs with smooth skin. "
               "She stands with her weight on one leg, one knee slightly bent. "),
         extra=EXPRESSION),
-    # 現代風格（2026-09-16 使用者要牛仔窄短裙）：身分句換成現代人，直式尺寸建議 704x1216。
+    # 現代風格（2026-09-16 使用者要牛仔窄短裙）
     "現代牛仔短裙": dict(
         style=STYLE.replace("soft cinematic key light", "warm soft window light across her bare shoulders and legs")
                    .replace("head-and-shoulders framing", "full-length framing from head to toe"),
@@ -73,6 +73,51 @@ VARIANTS = {
         body=("Bare smooth shoulders, a narrow waist, and long slender shapely legs with smooth skin. She stands with "
               "her weight on one leg, one knee slightly bent. "),
         identity="A 24-year-old woman with a slim figure, present-day fashion. ",
+        extra=EXPRESSION),
+
+    # 無審查 / 大膽性感系列（個人自用）
+    "性感蕾絲睡袍": dict(
+        style=STYLE.replace("soft cinematic key light", "moody intimate bedroom lighting with soft warm highlights")
+                   .replace("head-and-shoulders framing", "three-quarter framing"),
+        clothing=("She wears a translucent black floral lace slip with delicate thin spaghetti straps, "
+                  "the sheer fabric draped softly over her curves, revealing hints of her silhouette beneath. "),
+        body="Bare smooth shoulders, delicate collarbones, a narrow cinched waist, and a shapely feminine figure. ",
+        extra=EXPRESSION),
+    "微光半透真絲": dict(
+        style=STYLE.replace("soft cinematic key light", "soft morning sunlight streaming through sheer curtains, gentle lens bloom")
+                   .replace("head-and-shoulders framing", "three-quarter framing"),
+        clothing=("She wears an open champagne-hued semi-sheer silk chiffon robe slipping off her bare shoulders, "
+                  "unbuttoned at the chest to reveal her décolletage and cleavage. "),
+        body="Smooth bare shoulders, glowing skin, a slender waist, and a full voluptuous bust. ",
+        extra=EXPRESSION),
+    "濕身微透白襯衫": dict(
+        style=STYLE.replace("soft cinematic key light", "natural diffused daylight, crisp details with subtle rim light")
+                   .replace("head-and-shoulders framing", "three-quarter framing"),
+        clothing=("She wears an oversized damp white cotton dress shirt unbuttoned low down the chest, "
+                  "the semi-translucent wet fabric clinging delicately to her skin and contouring her bust. "),
+        body="Bare collarbones, a narrow waist, full bust visible through damp fabric, upright poised posture. ",
+        extra=EXPRESSION),
+    "比基尼泳裝・微風": dict(
+        style=STYLE.replace("soft cinematic key light", "golden hour sun-drenched beach lighting, soft sea spray")
+                   .replace("head-and-shoulders framing", "full-length framing from head to toe"),
+        clothing=("She wears a minimalist chic emerald green triangle string bikini, "
+                  "delicate straps tied at the neck and hips, bare legs, glistening fine water droplets on skin. "),
+        body=("Sun-kissed smooth skin, athletic slender waist, toned abdomen, full shapely bust, "
+              "and long shapely legs. She stands relaxed against a gentle ocean breeze. "),
+        extra=EXPRESSION),
+    "深V露背晚禮服": dict(
+        style=STYLE.replace("soft cinematic key light", "dramatic luxury architectural ballroom lighting, golden bokeh")
+                   .replace("head-and-shoulders framing", "full-length framing from head to toe"),
+        clothing=("She wears an alluring midnight-blue velvet evening gown cut with a daringly deep plunging V-neckline "
+                  "down to her navel and an open back, with a high slit revealing her leg. "),
+        body="Graceful posture, narrow cinched waist, full firm bust, smooth sculpted back, and long bare legs. ",
+        extra=EXPRESSION),
+    "極致貼身針織裙": dict(
+        style=STYLE.replace("soft cinematic key light", "warm contemporary penthouse interior lighting, soft ambient glow")
+                   .replace("head-and-shoulders framing", "three-quarter framing"),
+        clothing=("She wears an ultra-tight off-shoulder ribbed bodycon knit mini dress hugging every curve of her body, "
+                  "accentuating her bust and hips. "),
+        body="Sculpted hourglass silhouette, narrow waist, full round bust, smooth bare collarbones and shoulders. ",
         extra=EXPRESSION),
 
     # 男士正裝（2026-09-16 使用者要男士西裝選項）
@@ -213,11 +258,14 @@ FACE_PRESETS = {
 }
 BUST_PRESETS = {
     "default": "",
+    "slender": "Her bust is petite and modest, a delicate slender silhouette with graceful collarbones. ",
     "full": "Her bust is large, full and firm, with a rounded upper curve and a natural lift. ",
     "fuller": ("Her bust is very large, full and firm, sitting high and round with a pronounced upper curve and a "
                "strong natural lift. "),
     "huge": ("Her bust is extremely large and heavy yet firm, sitting high on her chest with a deep cleavage, a "
              "pronounced round upper curve and a strong lift. "),
+    "maximum": ("Her bust is extraordinarily massive, lush and heavy, exceptionally voluptuous with deep cleavage and "
+                "an ultra-pronounced curve. "),
 }
 # 參考圖鎖臉（GUI 上傳參考圖時用）。2026-09-16 實測：照原本的寫法接一句「臉要跟參考圖一樣」沒有用，
 # 一定要開頭結尾夾攻＋把會衝突的五官／膚色／髮型全部拿掉，只留族裔。
@@ -343,25 +391,41 @@ def contact_sheet(cells, names, seeds, out, thumb_w=384):
 
 
 def resolve_lora(spec):
-    """org/repo:檔名 → HF 快取裡的本機路徑。直接把 org/repo:檔名 交給 mflux，它會另外下載一份到自己的快取（2026-09-15 實測）。"""
-    if not spec or ":" not in spec or Path(spec).expanduser().exists():
+    """解析 LoRA：支援 loras/ 目錄檔案、本機路徑、或 HF org/repo:檔名。"""
+    if not spec:
+        return None
+    # 優先檢查專案根目錄的 loras/ 資料夾
+    local_lora = Path("loras") / spec
+    if local_lora.is_file():
+        return str(local_lora.resolve())
+    local_lora_st = Path("loras") / f"{spec}.safetensors"
+    if local_lora_st.is_file():
+        return str(local_lora_st.resolve())
+    if Path(spec).expanduser().exists():
+        return str(Path(spec).expanduser().resolve())
+    if ":" not in spec:
         return spec
     repo, filename = spec.split(":", 1)
     lm._ensure_hf_env()
     from huggingface_hub import hf_hub_download
-    return hf_hub_download(repo_id=repo, filename=filename)
+    return hf_hub_download(repo_id=repo, filename=filename, token=os.environ.get("HF_TOKEN"))
 
 
 def main():
     ap = argparse.ArgumentParser(description="立繪風格探針（畫質＋寫法對照）")
     ap.add_argument("--seeds", default="1131265990,424242")
-    ap.add_argument("--size", default="768x1152", help="寬x高，需為 16 的倍數")
+    ap.add_argument("--size", default="1024x1536" if lm.total_ram_gb() >= 30 else "768x1152",
+                    help="寬x高，需為 16 的倍數（32GB M5 原生支援 1024x1536 與 1024x1024）")
     ap.add_argument("--variants", default=None, help="只跑部分寫法，逗號分隔（預設全部）")
-    ap.add_argument("--use", default="commercial", choices=lm.USES,
-                    help="commercial＝只准可商用授權；personal＝自用，非商用授權也可以")
+    ap.add_argument("--use", default="personal", choices=lm.USES,
+                    help="personal＝自用（預設，支援非商用模型如 klein-9b）；commercial＝商用授權嚴格把關")
     ap.add_argument("--model", default=MODEL,
                     choices=[k for k, m in lm.MODELS.items() if m["kind"] in ("flux2", "z_image", "qwen")])
-    ap.add_argument("--lora", default=None, help="LoRA／LoKr：本機檔案，或 HF 的 org/repo:檔名.safetensors")
+    ap.add_argument("--quantize", type=int, default=8 if lm.total_ram_gb() >= 30 else 4, choices=[4, 8],
+                    help="量化位元：32GB M5 建議 8-bit（消除眼周微變形與色塊），24GB 機器用 4-bit")
+    ap.add_argument("--uncensored", action="store_true", help="掛載無審查 Text Encoder 解除提示詞審查限制")
+    ap.add_argument("--text-encoder", default=None, help="指定自訂或無審查 Text Encoder 路徑或 HF repo")
+    ap.add_argument("--lora", default=None, help="LoRA／LoKr：loras/ 檔名、本機檔案，或 HF 的 org/repo:檔名.safetensors")
     ap.add_argument("--lora-scale", type=float, default=1.0)
     ap.add_argument("--painted", action="store_true",
                     help="改用原本的繪畫風格句（預設是寫實照片風，非蒸餾模型另加推離繪畫感的負面提示詞）")
@@ -369,7 +433,8 @@ def main():
     ap.add_argument("--skin", default=None,
                     help="膚質寫法，逗號分隔可一次比多種：clean（商用預設）、fair（白皙＋中性光，個人預設）、"
                          "porcelain（瓷白＋冷光）、beauty（美妝級）、natural（自然紋理，Z-Image-Turbo 會有雀斑）")
-    ap.add_argument("--bust", default="default", choices=list(BUST_PRESETS), help="身形微調：full＝豐滿堅挺，fuller＝更大更高，huge＝再更大")
+    ap.add_argument("--bust", default="default", choices=list(BUST_PRESETS),
+                    help="身形微調：slender＝苗條精巧，full＝豐滿堅挺，fuller＝更大更高，huge＝超大，maximum＝極致巨大")
     ap.add_argument("--face", default="default", choices=list(FACE_PRESETS),
                     help="長相類型：fringe＝齊瀏海、褐綠色眼睛、深金褐長髮；east_asian＝東亞黑長髮、"
                          "east_asian_fringe＝東亞齊瀏海")
@@ -378,7 +443,7 @@ def main():
     ap.add_argument("--framing", default="default", choices=list(FRAMING_PRESETS),
                     help="取景：full＝全身、threequarter＝七分身、waist＝半身、head＝頭肩（預設照寫法的風格句）")
     ap.add_argument("--low-ram", action="store_true",
-                    help="MLX 快取上限 1GB＋VAE 分塊解碼（24GB 機器跑大模型用）")
+                    help="MLX 快取上限 1GB＋VAE 分塊解碼（24GB 機器跑大模型用，32GB 建議免開以加速常駐）")
     ap.add_argument("--dry-run", action="store_true", help="只印計畫與 prompt，不載模型")
     a = ap.parse_args()
 
@@ -413,13 +478,17 @@ def main():
 
     lora_tag = f"_{re.sub(r'[^A-Za-z0-9._-]+', '-', Path(a.lora.split(':')[-1]).stem)}" if a.lora else ""
     bust_tag = ("" if a.bust == "default" else f"_bust-{a.bust}") + ("" if a.face == "default" else f"_face-{a.face}")
-    out = Path(f"outputs/{a.use}_style/{time.strftime('%Y%m%d_%H%M%S')}_{key}{lora_tag}{bust_tag}")
+    q_tag = f"_q{a.quantize}"
+    out = Path(f"outputs/{a.use}_style/{time.strftime('%Y%m%d_%H%M%S')}_{key}{q_tag}{lora_tag}{bust_tag}")
     neg = negative_for(key, photo)
     d = lm.MODELS[key]["defaults"]
-    print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {len(names)} 種寫法 × {len(skins)} 種膚質 × {len(poses)} 種姿勢 × {len(seeds)} 顆 seed = "
+    print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {a.quantize}-bit 量化 · {len(names)} 種寫法 × {len(skins)} 種膚質 × {len(poses)} 種姿勢 × {len(seeds)} 顆 seed = "
           f"{len(rows) * len(seeds)} 張 · {width}x{height} · steps {d.get('steps')} · guidance {d.get('guidance')} · "
           f"{'照片風' if photo else '原風格句'} · 膚質 {','.join(skins)} · 身形 {a.bust} · 長相 {a.face} · "
           f"姿勢 {','.join(poses)} · 取景 {a.framing}")
+    te_target = a.text_encoder or ("darknight9121/FLUX.2-klein-base-9B-bucket-uncensored" if a.uncensored else None)
+    if te_target:
+        print(f"== 無審查 Text Encoder：{te_target}")
     print(f"== LoRA：{f'{a.lora}（強度 {a.lora_scale}）' if a.lora else '無'}")
     print(f"== 負面提示詞：{neg or '（蒸餾模型不吃）'}")
     for n, sk, po, row in rows:
@@ -431,8 +500,10 @@ def main():
     lora_path = resolve_lora(a.lora)
     if lora_path:
         print(f"== LoRA 本機路徑：{lora_path}", flush=True)
-    model = lm.load(key, a.use, low_ram=a.low_ram, lora_paths=[lora_path] if lora_path else None,
-                    lora_scales=[a.lora_scale] if lora_path else None)
+    model = lm.load(key, a.use, quantize=a.quantize, low_ram=a.low_ram,
+                    lora_paths=[lora_path] if lora_path else None,
+                    lora_scales=[a.lora_scale] if lora_path else None,
+                    text_encoder_path=te_target)
     results, cells = [], {}
     for n, sk, po, row in rows:
         prompt = build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po, framing=a.framing)

@@ -34,21 +34,23 @@ _last = time.time()            # 最後一次活動時間（給閒置卸載用�
 
 
 def _prepare_refs(raw_refs, out_dir):
-    """如果有參考照片，使用 travel_with_me.prepare_refs 自動裁切人臉（768x768），精準鎖定五官特徵並節省記憶體。"""
+    """如果有參考照片，使用 travel_with_me.prepare_refs 自動裁切人臉（32GB: 1024x1024, 24GB: 768x768），精準鎖定五官特徵並節省記憶體。"""
     import sys
     sys.path.insert(0, str(REPO_ROOT / "recipes"))
     sys.path.insert(0, str(REPO_ROOT / "recipes" / "personal"))
+    import local_models as lm
     try:
         import travel_with_me as tw
         prep_dir = Path(out_dir) / "refs"
-        return [str(p) for p in tw.prepare_refs([Path(p) for p in raw_refs], prep_dir, size=768, face_crop=True)]
+        ref_size = 1024 if lm.total_ram_gb() >= 30 else 768
+        return [str(p) for p in tw.prepare_refs([Path(p) for p in raw_refs], prep_dir, size=ref_size, face_crop=True)]
     except Exception as e:
         print(f"[klein_worker] 自動裁臉失敗，退回原圖: {e}", flush=True)
         return raw_refs
 
 
 def _load(edit: bool = False):
-    """第一次呼叫才載入 klein-9B；有參考圖時載入 Flux2KleinEdit，純文字生圖載入 Flux2Klein。"""
+    """第一次呼叫才載入 klein-9B；有參考圖時載入 Flux2KleinEdit，純文字生圖載入 Flux2Klein。32GB 機器採 8-bit 量化。"""
     global _model, _model_edit
     if _model is not None and _model_edit != edit:
         print(f"[klein_worker] 切換模型模式 (edit={edit})，釋放先前模型...", flush=True)
@@ -57,18 +59,16 @@ def _load(edit: bool = False):
         gc.collect()
 
     if _model is None:
-        from mflux.models.common.config import ModelConfig
-        from mflux.models.flux2.variants import Flux2Klein, Flux2KleinEdit
-        from mflux.callbacks.instances.memory_saver import MemorySaver
-        cls = Flux2KleinEdit if edit else Flux2Klein
-        print(f"[klein_worker] 正在載入 {cls.__name__} (FLUX.2 klein-9B)...", flush=True)
-        _model = cls(quantize=4, model_config=ModelConfig.flux2_klein_9b())
-        if hasattr(_model, "callbacks"):
-            _model.callbacks.register(
-                MemorySaver(model=_model, keep_transformer=True, cache_limit_bytes=1000**3, num_seeds=2)
-            )
+        import sys
+        sys.path.insert(0, str(REPO_ROOT / "recipes"))
+        import local_models as lm
+        quantize = 8 if lm.total_ram_gb() >= 30 else 4
+        low_ram = (lm.total_ram_gb() < 30)
+        cls_name = "Flux2KleinEdit" if edit else "Flux2Klein"
+        print(f"[klein_worker] 正在載入 {cls_name} (FLUX.2 klein-9B, quantize={quantize}, low_ram={low_ram})...", flush=True)
+        _model = lm.load("klein-9b", "personal", quantize=quantize, edit=edit, low_ram=low_ram, single_run=False)
         _model_edit = edit
-        print(f"[klein_worker] 模型已就緒 (edit={edit})", flush=True)
+        print(f"[klein_worker] 模型已就緒 (edit={edit}, quantize={quantize})", flush=True)
     return _model
 
 

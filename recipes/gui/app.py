@@ -38,16 +38,16 @@ import portrait_style_probe as probe  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
 OUT_ROOT = Path("outputs/personal_style/gui")
-MIN_FREE_PCT = 15  # 可用記憶體低於這個百分比就不開始生成
-# 放大上限：SeedVR2 的 resolution 參數指的是「短邊」，不是長邊。768×1152 放到 1536×2304 實測可行
-# （112 秒，過程中可用記憶體最低 26%）；直式 704×1216 若照短邊 1536 會變成 1536×2654，比實測還大，
-# 24GB 機器有被系統砍掉的風險，所以改成「最多 2 倍，且輸出像素不超過實測值」。
+# 可用記憶體門檻：32GB M5 下降為 5% 避免誤擋；24GB Mac mini 維持 15% 防線確保不崩潰
+MIN_FREE_PCT = 15 if lm.total_ram_gb() < 30 else 5
+# 放大上限：SeedVR2 的 resolution 參數指的是「短邊」，不是長邊。
 UPSCALE_MAX_PIXELS = 1536 * 2304
 UPSCALE_MAX_SCALE = 2.0
 
 # 介面上的模型選單（model 對應 local_models.MODELS；lora 為 None 代表不掛外掛）
 MODELS = [
     dict(id="klein-9b", label="klein-9B（標準）", model="klein-9b", use="personal", lora=None),
+    dict(id="klein-9b-uncensored", label="klein-9B（無審查 Text Encoder）", model="klein-9b-uncensored", use="personal", lora=None),
 ]
 
 # 不進版控的本機模型設定（repo 是公開的）：同資料夾放 models_local.py，定義 EXTRA_MODELS = [dict(id=..., label=...,
@@ -59,8 +59,15 @@ if _LOCAL_MODELS.exists():
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     MODELS = list(_mod.EXTRA_MODELS) + MODELS
-# 尺寸只決定畫布比例，取景由「取景」選項（風格句）決定，所以標籤不再寫全身／半身，免得誤會
-SIZES = [("704x1216", "直式 704×1216"), ("768x1152", "直式 768×1152"), ("1024x1024", "方形 1024×1024")]
+
+# 尺寸選單：24GB 機器推薦 704×1216 / 768×1152；32GB 機器原生支援 1024×1024 / 1024×1536
+SIZES = [
+    ("704x1216", "直式 704×1216 (24GB 推薦)"),
+    ("768x1152", "直式 768×1152"),
+    ("1024x1024", "方形 1024×1024 (32GB 原生)"),
+    ("1024x1536", "高解析直式 1024×1536 (32GB 原生)"),
+    ("1536x1024", "高解析橫式 1536×1024 (32GB 原生)"),
+]
 
 _state = dict(running=False, message="待命中", queue=0, done=0, total=0, results=[], error=None, started=None)
 _lock = threading.Lock()
@@ -110,7 +117,9 @@ def get_model(model_key, use, lora, edit):
         _loaded.update(key=None, model=None)
         lm.free()
     lora_path = probe.resolve_lora(lora) if lora else None
-    model = lm.load(model_key, use, edit=edit, low_ram=True,
+    low_ram = (lm.total_ram_gb() < 30)
+    quantize = 8 if lm.total_ram_gb() >= 30 else 4
+    model = lm.load(model_key, use, quantize=quantize, edit=edit, low_ram=low_ram,
                     lora_paths=[lora_path] if lora_path else None, lora_scales=[1.0] if lora_path else None)
     _loaded.update(key=key, model=model)
     return model
@@ -130,8 +139,9 @@ def prepare_ref(data_url, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
     src = out_dir / "upload.jpg"
     src.write_bytes(raw)
-    # 768（＝travel_with_me 的預設）比 640 多保留一些五官細節，24GB 機器仍跑得動
-    return tw.prepare_refs([src], out_dir, size=768, face_crop=True)
+    # 32GB 機器支援 1024 參考圖細節更精緻，24GB 機器維持 768
+    ref_size = 1024 if lm.total_ram_gb() >= 30 else 768
+    return tw.prepare_refs([src], out_dir, size=ref_size, face_crop=True)
 
 
 def run_job(job):
@@ -304,11 +314,18 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(html)
         elif path == "/api/options":
+            bust_labels = {
+                "default": "原本",
+                "slender": "苗條精巧",
+                "full": "豐滿堅挺",
+                "fuller": "更大更高",
+                "huge": "超大",
+                "maximum": "極致巨大",
+            }
             self._json(200, dict(
                 variants=list(probe.VARIANTS),
                 skins=[dict(key=k, label=v["label"]) for k, v in probe.SKIN_PRESETS.items()],
-                busts=[dict(key=k, label={"default": "原本", "full": "豐滿堅挺", "fuller": "更大更高", "huge": "再更大"}.get(k, k))
-                       for k in probe.BUST_PRESETS],
+                busts=[dict(key=k, label=bust_labels.get(k, k)) for k in probe.BUST_PRESETS],
                 faces=[dict(key=k, label=v["label"]) for k, v in probe.FACE_PRESETS.items()],
                 poses=[dict(key=k, label=v["label"]) for k, v in probe.POSE_PRESETS.items()],
                 framings=[dict(key=k, label=v["label"]) for k, v in probe.FRAMING_PRESETS.items()],
