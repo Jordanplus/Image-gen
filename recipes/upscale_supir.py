@@ -182,68 +182,79 @@ def run_upscale(
     seed: int = 42,
     out_path: Path | None = None,
 ) -> Path:
+    spawned_proc = None
     if not is_comfy_running():
-        start_comfy_server()
+        spawned_proc = start_comfy_server()
 
-    print(f"[INFO] 正在上傳與準備輸入圖: {image_path}")
-    uploaded_name = upload_image(image_path)
+    try:
+        print(f"[INFO] 正在上傳與準備輸入圖: {image_path}")
+        uploaded_name = upload_image(image_path)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = f"SUPIR_{timestamp}"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"SUPIR_{timestamp}"
 
-    workflow = build_workflow(
-        input_image_name=uploaded_name,
-        scale_by=scale,
-        steps=steps,
-        cfg=cfg,
-        prompt_text=prompt,
-        neg_prompt=negative,
-        restore_cfg=restore_cfg,
-        seed=seed,
-        output_prefix=prefix,
-    )
+        workflow = build_workflow(
+            input_image_name=uploaded_name,
+            scale_by=scale,
+            steps=steps,
+            cfg=cfg,
+            prompt_text=prompt,
+            neg_prompt=negative,
+            restore_cfg=restore_cfg,
+            seed=seed,
+            output_prefix=prefix,
+        )
 
-    data = json.dumps({"prompt": workflow}).encode("utf-8")
-    req = urllib.request.Request(
-        f"{COMFY_URL}/prompt",
-        data=data,
-        headers={"Content-Type": "application/json"}
-    )
+        data = json.dumps({"prompt": workflow}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{COMFY_URL}/prompt",
+            data=data,
+            headers={"Content-Type": "application/json"}
+        )
 
-    with urllib.request.urlopen(req) as resp:
-        res = json.loads(resp.read().decode())
-        prompt_id = res["prompt_id"]
+        with urllib.request.urlopen(req) as resp:
+            res = json.loads(resp.read().decode())
+            prompt_id = res["prompt_id"]
 
-    print(f"[INFO] 已排入 SUPIR 放大佇列，任務 ID: {prompt_id}（放大倍率: {scale}x, 步數: {steps}）")
-    start_t = time.time()
+        print(f"[INFO] 已排入 SUPIR 放大佇列，任務 ID: {prompt_id}（放大倍率: {scale}x, 步數: {steps}）")
+        start_t = time.time()
 
-    while True:
-        time.sleep(3)
-        elapsed = int(time.time() - start_t)
-        hist_req = urllib.request.Request(f"{COMFY_URL}/history/{prompt_id}")
-        with urllib.request.urlopen(hist_req) as resp:
-            hist = json.loads(resp.read().decode())
-            if prompt_id in hist:
-                item = hist[prompt_id]
-                status = item.get("status", {})
-                if status.get("status_str") == "error":
-                    raise RuntimeError(f"SUPIR 執行失敗: {status.get('messages')}")
+        while True:
+            time.sleep(3)
+            elapsed = int(time.time() - start_t)
+            hist_req = urllib.request.Request(f"{COMFY_URL}/history/{prompt_id}")
+            with urllib.request.urlopen(hist_req) as resp:
+                hist = json.loads(resp.read().decode())
+                if prompt_id in hist:
+                    item = hist[prompt_id]
+                    status = item.get("status", {})
+                    if status.get("status_str") == "error":
+                        raise RuntimeError(f"SUPIR 執行失敗: {status.get('messages')}")
 
-                outputs = item.get("outputs", {})
-                img_info = outputs.get("11", {}).get("images", [{}])[0]
-                saved_filename = img_info.get("filename")
-                if not saved_filename:
-                    raise RuntimeError("未在輸出節點找到生成圖片")
+                    outputs = item.get("outputs", {})
+                    img_info = outputs.get("11", {}).get("images", [{}])[0]
+                    saved_filename = img_info.get("filename")
+                    if not saved_filename:
+                        raise RuntimeError("未在輸出節點找到生成圖片")
 
-                generated_file = COMFY_DIR / "output" / saved_filename
-                OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-                final_dest = out_path or (OUTPUT_DIR / f"{prefix}_{image_path.stem}_{scale}x.png")
-                shutil.copy2(generated_file, final_dest)
-                print(f"[SUCCESS] 放大完成！耗時: {elapsed} 秒")
-                print(f"[SUCCESS] 輸出儲存至: {final_dest}")
-                return final_dest
+                    generated_file = COMFY_DIR / "output" / saved_filename
+                    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                    final_dest = out_path or (OUTPUT_DIR / f"{prefix}_{image_path.stem}_{scale}x.png")
+                    shutil.copy2(generated_file, final_dest)
+                    print(f"\n[SUCCESS] 放大完成！耗時: {elapsed} 秒")
+                    print(f"[SUCCESS] 輸出儲存至: {final_dest}")
+                    return final_dest
 
-            print(f"[{elapsed}s] 正在執行 SUPIR 重建採樣與特徵對齊...", end="\r", flush=True)
+                print(f"[{elapsed}s] 正在執行 SUPIR 重建採樣與特徵對齊...", end="\r", flush=True)
+    finally:
+        if spawned_proc is not None:
+            print("\n[INFO] 正在結束 ComfyUI 服務端，釋放記憶體與 GPU 資源...")
+            spawned_proc.terminate()
+            try:
+                spawned_proc.wait(timeout=5)
+            except Exception:
+                spawned_proc.kill()
+            print("[INFO] ComfyUI 已完全結束，系統資源已全數釋放")
 
 
 def main():
