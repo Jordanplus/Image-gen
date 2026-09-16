@@ -163,6 +163,18 @@ FACE_PRESETS = {
                               hair=("Her long straight black hair falls past her shoulders, with a soft blunt fringe "
                                     "falling to her eyebrows. "),
                               ethnic=_EAST_ASIAN),
+    "east_asian_ponytail": dict(label="東亞・高馬尾",
+                                face=(_EAST_ASIAN + "A softly oval face with smooth delicate features, high cheekbones, "
+                                      "dark almond-shaped eyes with a direct gaze, and full natural lips. "),
+                                hair=("Her sleek black hair is pulled up tightly into a high, bouncy ponytail at the crown "
+                                      "of her head, with the long tail falling down her back and a few soft wisps framing her face. "),
+                                ethnic=_EAST_ASIAN),
+    "ponytail": dict(label="高馬尾（歐美褐髮）",
+                     face=("An oval face with soft delicate features, high cheekbones, hazel-green eyes with a direct "
+                           "gaze, and full natural lips. "),
+                     hair=("Her dark-blonde hair is gathered into a sleek high ponytail at the crown of her head, "
+                           "with a few soft delicate strands framing her temples. "),
+                     ethnic=None),
 }
 BUST_PRESETS = {
     "default": "",
