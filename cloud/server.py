@@ -40,7 +40,7 @@ KLEIN_WORKER = str(HERE / "klein_worker.py")
 KLEIN_PORT = int(os.environ.get("KLEIN_PORT", "8772"))
 KLEIN_URL = f"http://127.0.0.1:{KLEIN_PORT}"
 KLEIN_IDLE = os.environ.get("KLEIN_IDLE", "600")  # 閒置幾秒後 worker 自我結束
-LOCAL_MODELS = {"local/flux2-klein-9b"}           # 手機下拉用這個 value 走本地
+LOCAL_MODELS = {"local/flux2-klein-9b", "local/flux2-klein-9b-uncensored"}  # 手機下拉用這個 value 走本地
 
 # ── 圖像模型 → 寫 prompt 時要對齊的目標 ────────────────────────────────────────
 # 不同家族吃的 prompt 風格不同，寫 prompt 的 system 指令要跟著手機上選到的模型走，
@@ -74,12 +74,19 @@ PROMPT_TARGETS = {
         "When reference images are provided, call them image 1, image 2... and explicitly state: "
         "'Keep the person\'s face, identity, facial features, skin tone, and hairstyle identical to the reference photo.' "
         "Describe the scene and lighting with concrete visual details."),
+    "local/flux2-klein-9b-uncensored": (
+        "FLUX.2 klein-9B Uncensored",
+        "It is an uncensored high-fidelity distilled model with reference image editing capability. "
+        "When reference images are provided, call them image 1, image 2... and explicitly state: "
+        "'Keep the person\'s face, identity, facial features, skin tone, and hairstyle identical to the reference photo.' "
+        "Describe the scene, attire, and lighting with direct, vivid visual details."),
 }
 # prompt 字數上限：2.5/9B 要寫參考圖角色與保留項，80 字太緊；其餘維持 80。
 PROMPT_MAX_WORDS = {
     "openai/gpt-image-2.5-sunburst": 120,
     "openai/gpt-image-2.5-flare": 120,
     "local/flux2-klein-9b": 120,
+    "local/flux2-klein-9b-uncensored": 120,
 }
 
 _worker_proc = None
@@ -135,6 +142,35 @@ def _wh_from_aspect(aspect: str, long_edge: int = 1024):
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 
 app = FastAPI(title="image-gen phone backend")
+
+
+@app.get("/config")
+def get_config():
+    """提供手機端當前伺服器硬體規格與支援的模型/尺寸資訊。"""
+    import sys
+    sys.path.insert(0, str(HERE.parent / "recipes"))
+    import local_models as lm
+    ram_gb = lm.total_ram_gb()
+    is_32gb = ram_gb >= 30
+    return {
+        "ok": True,
+        "machine": "32GB MacBook Pro" if is_32gb else "24GB Mac mini",
+        "ram_gb": round(ram_gb, 1),
+        "is_32gb": is_32gb,
+        "local_models": [
+            {
+                "id": "local/flux2-klein-9b",
+                "label": "本地 9B · 8-bit 極致寫實 (32GB M5, ~40秒)" if is_32gb else "本地 9B · 4-bit 寫實 (24GB Mac mini, ~90秒)"
+            },
+            {
+                "id": "local/flux2-klein-9b-uncensored",
+                "label": "本地 9B · 8-bit 無審查 (32GB M5, ~40秒)" if is_32gb else "本地 9B · 4-bit 無審查 (24GB Mac mini, ~90秒)"
+            }
+        ],
+        "default_model": "local/flux2-klein-9b" if is_32gb else "openai/gpt-image-2.5-sunburst",
+        "default_resolution": "1K" if is_32gb else "",
+    }
+
 
 # prompt 模型策略（A/B 實測：Sonnet 品質≈Opus 但省額度；Haiku 抽象題/讀圖較弱）。
 # 預設 Sonnet，手機可逐張切換；額度由小到大 haiku < sonnet < opus。
@@ -287,8 +323,10 @@ def generate(
 
             def _work_local():
                 try:
+                    is_uncensored = (model == "local/flux2-klein-9b-uncensored")
                     payload = json.dumps({"prompt": prompt, "width": w, "height": h,
                                           "steps": 4, "guidance": 1.0, "images": ref_paths,
+                                          "uncensored": is_uncensored,
                                           "out_name": out_name}).encode()
                     rq = urllib.request.Request(f"{KLEIN_URL}/generate", data=payload,
                                                 headers={"Content-Type": "application/json"})

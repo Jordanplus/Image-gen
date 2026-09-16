@@ -47,7 +47,7 @@
 </style>
 </head>
 <body>
-  <h1>🎨 ImageGen <span>· apipass gpt-image-2.5</span></h1>
+  <h1>🎨 ImageGen <span>· apipass gpt-image-2.5</span> <span id="hw-badge" style="display:none; font-size:12px; font-weight:normal; background:#1b2840; color:#8ab4f8; padding:3px 9px; border-radius:12px; vertical-align:middle;"></span></h1>
 
   <div class="card">
     <label>想生什麼？（用中文/口語描述意圖即可，Claude 會幫你寫 prompt）</label>
@@ -269,7 +269,8 @@ $('go').addEventListener('click', async () => {
 
   // 跳動的階段訊息 + 秒數（就算串流被緩衝，計時器照跳，不會像當機）
   const isLocal = $('model').value.startsWith('local/');   // 本地 9B vs apipass → 文案不同
-  const genMsg = isLocal ? '🎨 本地 9B 生圖中…（這台跑，約 90 秒）'
+  const isUncensored = $('model').value.includes('uncensored');
+  const genMsg = isLocal ? ('🎨 本地 9B' + (isUncensored ? '（無審查）' : '') + ' 生圖中…（' + (window.__hostConfig && window.__hostConfig.is_32gb ? '32GB M5 原生 ~40秒' : '24GB Mac mini ~90秒') + '）')
                          : '🎨 生圖中…（apipass，通常還要 20–50 秒）';
   const t0 = Date.now();
   let stageMsg = $('writep').checked ? '✍️ Claude 正在寫 prompt…' : genMsg;
@@ -406,6 +407,39 @@ $('up_go').addEventListener('click', async () => {
     $('up_go').disabled = false;
   }
 });
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/config', {
+      headers: { 'X-App-Token': localStorage.getItem('app_token') || '' }
+    });
+    if (!r.ok) return;
+    const cfg = await r.json();
+    window.__hostConfig = cfg;
+    if (cfg.machine) {
+      const badge = $('hw-badge');
+      badge.textContent = (cfg.is_32gb ? '💻 ' : '🖥️ ') + cfg.machine + (cfg.is_32gb ? ' (8-bit 原生)' : ' (4-bit 輕量)');
+      badge.style.display = 'inline-block';
+    }
+    if (cfg.local_models && cfg.local_models.length) {
+      const sel = $('model');
+      [...sel.options].forEach(opt => { if (opt.value.startsWith('local/')) opt.remove(); });
+      cfg.local_models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.label;
+        sel.appendChild(opt);
+      });
+      if (cfg.default_model) sel.value = cfg.default_model;
+    }
+    if (cfg.default_resolution && !$('resolution').value) {
+      $('resolution').value = cfg.default_resolution;
+    }
+  } catch (e) {
+    console.log('Config load skipped:', e);
+  }
+}
+loadConfig();
 </script>
 </body>
 </html>

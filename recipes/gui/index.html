@@ -50,9 +50,9 @@
   #light img { max-width: 100%; max-height: 100%; border-radius: 6px; }
 </style>
 </head>
-<body>
 <header>
   <h1>本機生圖</h1>
+  <span id="hw" style="font-size:12px; background:#1e2d45; color:#8ab4f8; padding:2px 10px; border-radius:12px; font-weight:500;"></span>
   <span id="mem">只跑在這台 Mac，外面連不到</span>
   <span id="stale" style="color:#ffb4b4" hidden>⚠ 這是舊版頁面，請按 ⌘R 重新整理</span>
 </header>
@@ -119,6 +119,9 @@ function fill(sel, items, key = 'key', label = 'label') {
 
 async function loadOptions() {
   const o = await (await fetch('/api/options')).json();
+  if (o.hardware) {
+    $('hw').textContent = (o.hardware.is_32gb ? '💻 ' : '🖥️ ') + o.hardware.machine + ' · ' + o.hardware.mode;
+  }
   fill($('variant'), o.variants);
   fill($('model_id'), o.models, 'id');
   fill($('skin'), o.skins);
@@ -126,6 +129,9 @@ async function loadOptions() {
   fill($('face'), o.faces);
   fill($('framing'), o.framings);
   fill($('size'), o.sizes);
+  if (o.hardware && o.hardware.default_size) {
+    $('size').value = o.hardware.default_size;
+  }
   $('poses').innerHTML = o.poses.map(p =>
     `<label><input type="checkbox" value="${p.key}"${p.key === 'default' ? ' checked' : ''}>${p.label}</label>`).join('');
   $('skin').value = o.default_skin;

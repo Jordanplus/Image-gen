@@ -314,6 +314,30 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(html)
         elif path == "/api/options":
+            ram_gb = lm.total_ram_gb()
+            is_32gb = ram_gb >= 30
+            hardware = dict(
+                ram_gb=round(ram_gb, 1),
+                is_32gb=is_32gb,
+                machine="32GB MacBook Pro" if is_32gb else "24GB Mac mini",
+                mode="8-bit 常駐旗艦模式" if is_32gb else "4-bit 輕量安全模式",
+                default_size="1024x1536" if is_32gb else "704x1216",
+            )
+            # 依硬體自動呈現最適模型標籤
+            dyn_models = [
+                dict(id="klein-9b",
+                     label="klein-9B（8-bit 旗艦·32GB 原生）" if is_32gb else "klein-9B（4-bit·24GB 推薦）"),
+                dict(id="klein-9b-uncensored",
+                     label="klein-9B（8-bit 無審查·32GB 原生）" if is_32gb else "klein-9B（4-bit 無審查·24GB）"),
+            ]
+            # 依硬體推薦最佳尺寸
+            dyn_sizes = [
+                dict(key="1024x1536", label="高解析直式 1024×1536 ★32GB推薦" if is_32gb else "高解析直式 1024×1536 (24GB較吃記憶體)"),
+                dict(key="1024x1024", label="方形 1024×1024 ★32GB推薦" if is_32gb else "方形 1024×1024 (24GB較吃記憶體)"),
+                dict(key="1536x1024", label="高解析橫式 1536×1024 ★32GB推薦" if is_32gb else "高解析橫式 1536×1024 (24GB較吃記憶體)"),
+                dict(key="768x1152", label="直式 768×1152" + ("" if is_32gb else " ★24GB推薦")),
+                dict(key="704x1216", label="直式 704×1216" + ("" if is_32gb else " ★24GB推薦")),
+            ]
             bust_labels = {
                 "default": "原本",
                 "slender": "苗條精巧",
@@ -323,14 +347,15 @@ class Handler(BaseHTTPRequestHandler):
                 "maximum": "極致巨大",
             }
             self._json(200, dict(
+                hardware=hardware,
                 variants=list(probe.VARIANTS),
                 skins=[dict(key=k, label=v["label"]) for k, v in probe.SKIN_PRESETS.items()],
                 busts=[dict(key=k, label=bust_labels.get(k, k)) for k in probe.BUST_PRESETS],
                 faces=[dict(key=k, label=v["label"]) for k, v in probe.FACE_PRESETS.items()],
                 poses=[dict(key=k, label=v["label"]) for k, v in probe.POSE_PRESETS.items()],
                 framings=[dict(key=k, label=v["label"]) for k, v in probe.FRAMING_PRESETS.items()],
-                models=[dict(id=m["id"], label=m["label"]) for m in MODELS],
-                sizes=[dict(key=k, label=v) for k, v in SIZES],
+                models=dyn_models,
+                sizes=dyn_sizes,
                 default_skin=probe.DEFAULT_SKIN["personal"]))
         elif path == "/api/status":
             with _lock:

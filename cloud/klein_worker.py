@@ -29,6 +29,7 @@ IDLE_SECONDS = int(os.environ.get("KLEIN_IDLE", "600"))
 
 _model = None
 _model_edit = None
+_model_uncensored = False
 _lock = threading.Lock()       # 單 GPU → 生成序列化
 _last = time.time()            # 最後一次活動時間（給閒置卸載用）
 
@@ -49,11 +50,11 @@ def _prepare_refs(raw_refs, out_dir):
         return raw_refs
 
 
-def _load(edit: bool = False):
+def _load(edit: bool = False, uncensored: bool = False):
     """第一次呼叫才載入 klein-9B；有參考圖時載入 Flux2KleinEdit，純文字生圖載入 Flux2Klein。32GB 機器採 8-bit 量化。"""
-    global _model, _model_edit
-    if _model is not None and _model_edit != edit:
-        print(f"[klein_worker] 切換模型模式 (edit={edit})，釋放先前模型...", flush=True)
+    global _model, _model_edit, _model_uncensored
+    if _model is not None and (_model_edit != edit or _model_uncensored != uncensored):
+        print(f"[klein_worker] 切換模型模式 (edit={edit}, uncensored={uncensored})，釋放先前模型...", flush=True)
         _model = None
         import gc
         gc.collect()
@@ -64,11 +65,13 @@ def _load(edit: bool = False):
         import local_models as lm
         quantize = 8 if lm.total_ram_gb() >= 30 else 4
         low_ram = (lm.total_ram_gb() < 30)
+        model_key = "klein-9b-uncensored" if uncensored else "klein-9b"
         cls_name = "Flux2KleinEdit" if edit else "Flux2Klein"
-        print(f"[klein_worker] 正在載入 {cls_name} (FLUX.2 klein-9B, quantize={quantize}, low_ram={low_ram})...", flush=True)
-        _model = lm.load("klein-9b", "personal", quantize=quantize, edit=edit, low_ram=low_ram, single_run=False)
+        print(f"[klein_worker] 正在載入 {cls_name} ({model_key}, quantize={quantize}, low_ram={low_ram})...", flush=True)
+        _model = lm.load(model_key, "personal", quantize=quantize, edit=edit, low_ram=low_ram, single_run=False)
         _model_edit = edit
-        print(f"[klein_worker] 模型已就緒 (edit={edit}, quantize={quantize})", flush=True)
+        _model_uncensored = uncensored
+        print(f"[klein_worker] 模型已就緒 ({model_key}, edit={edit}, quantize={quantize})", flush=True)
     return _model
 
 
@@ -86,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"ok": True, "loaded": _model is not None, "edit": _model_edit})
+            self._json(200, {"ok": True, "loaded": _model is not None, "edit": _model_edit, "uncensored": _model_uncensored})
         else:
             self._json(404, {"ok": False, "error": "not found"})
 
@@ -100,6 +103,7 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(n) or b"{}")
             prompt = req["prompt"]
             raw_images = req.get("images") or []
+            uncensored = bool(req.get("uncensored"))
         except Exception as e:  # noqa: BLE001
             self._json(400, {"ok": False, "error": f"bad request: {e}"})
             return
@@ -108,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             _last = time.time()
             try:
                 is_edit = bool(raw_images)
-                model = _load(edit=is_edit)
+                model = _load(edit=is_edit, uncensored=uncensored)
                 seed = int(req.get("seed") or int(time.time()))
 
                 prep_refs = []
