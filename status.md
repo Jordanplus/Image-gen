@@ -1,6 +1,18 @@
 # status.md
 
-## 2026-09-15（晚）：立繪寫法探針、Z-Image-Turbo 4-bit、LoRA 外掛
+## 2026-09-16：mflux 升級 0.19.1、解鎖 32GB M5 8-bit 與無審查設定、雙機型自動偵測適配
+- **mflux 升級**：升級至 `v0.19.1`（搭配 `mlx 0.32.2`、`torch 2.14.0`、`huggingface-hub 1.31.0`）。
+- **32GB M5 MacBook Pro 解鎖**：
+  - 8-bit 量化（`quantize=8`）：消除 4-bit 量化造成的色塊與眼周微變形，實測 512×512 僅 8.44 秒，32GB 記憶體充裕且 0 swap。
+  - 原生 1024×1024 / 1024×1536 尺寸與高畫質 1024px 臉部參考圖。
+  - 模型常駐：解除過於激進的記憶體卸載（低壓防線由 15% 放寬至 5%），避免常駐模式下重複載入。
+- **無審查設定與立繪寫法**：
+  - `recipes/local_models.py` 支援 `klein-9b-uncensored`，支援自訂無審查 Text Encoder 與 LoRA 注入。
+  - `recipes/commercial/portrait_style_probe.py` 預設改為 `klein-9b`，預設 `--use personal`，新增 6 款大膽寫實衣著風格與胸圍預設（`slender`、`maximum`）。
+- **雙機型自動判斷適配（32GB vs 24GB）**：
+  - **WebUI（`recipes/gui/app.py` & `index.html`）**：`/api/options` 動態回傳硬體規格與徽章；32GB 自動推薦 8-bit 原生模型與 1024×1536 尺寸，24GB 自動切換 4-bit 推薦與 704×1216 / 768×1152 尺寸並維持 15% 防線。
+  - **手機端 PWA（`cloud/server.py`、`klein_worker.py`、`cloud/static/index.html`）**：新增 `/config` 接口，手機端連線時自動識別主機（32GB M5 原生 8-bit 40秒 vs 24GB 4-bit 90秒），下拉選單動態載入最適合的本地模型與解析度預設。
+
 - 使用者評比重點是**畫質與風格**（不是斑點／年齡）→ 遊戲立繪用 klein-4B＋「露肩＋低胸＋柔光」寫法；測試一律寫實照片風。
 - `recipes/commercial/portrait_style_probe.py`（新）：多種寫法 × 多顆 seed 對照；`--use personal`、`--lora`（LoRA／LoKr，自動改用 HF 快取路徑）、`--low-ram`、`--painted`、`--skin`（膚質／膚色：商用預設 clean、個人預設 fair 白皙）；本機私有寫法放不進版控的 `portrait_variants_local.py`。
 - `recipes/local_models.py`：新增 `z-image-turbo`、`z-image-turbo-q4`、`qwen-image-2512`；`load()` 可帶 LoRA（FLUX.2、Z-Image）與預先量化模型。
