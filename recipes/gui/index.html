@@ -25,6 +25,10 @@
   .row { display: flex; gap: 10px; }
   .row > * { flex: 1; }
   .note { font-size: 12px; color: #777; margin-top: 6px; }
+  .checks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 10px; max-height: 168px; overflow: auto;
+            border: 1px solid #333; border-radius: 6px; padding: 7px 9px; background: #111; }
+  .checks label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: #ccc; }
+  .checks input { margin: 0; }
   #status { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; background: #1c1c1c;
             border: 1px solid #2a2a2a; font-size: 14px; }
   #status.err { border-color: #8a3b3b; color: #ffb4b4; }
@@ -34,12 +38,23 @@
   .cap { font-size: 12px; color: #999; margin-top: 4px; }
   #ref { font-size: 13px; }
   #refPrev { max-width: 120px; border-radius: 6px; margin-top: 8px; display: none; }
+  .grid img { cursor: zoom-in; }
+  .up { margin-top: 6px; width: 100%; box-sizing: border-box; padding: 6px; font: inherit; font-size: 12px;
+        font-weight: 500; border-radius: 6px; background: #2a2a2a; color: #ccc; border: 1px solid #3a3a3a;
+        cursor: pointer; display: block; text-align: center; text-decoration: none; }
+  .up:disabled { color: #666; cursor: default; }
+  a.up { color: #8bb8f5; }
+  #light { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .93); padding: 20px;
+           display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  #light[hidden] { display: none; }
+  #light img { max-width: 100%; max-height: 100%; border-radius: 6px; }
 </style>
 </head>
 <body>
 <header>
   <h1>本機生圖</h1>
   <span id="mem">只跑在這台 Mac，外面連不到</span>
+  <span id="stale" style="color:#ffb4b4" hidden>⚠ 這是舊版頁面，請按 ⌘R 重新整理</span>
 </header>
 <main>
   <form class="panel" id="form">
@@ -55,21 +70,29 @@
     </div>
     <div class="row">
       <div><label>長相</label><select id="face"></select></div>
-      <div><label>姿勢</label><select id="pose"></select></div>
+      <div><label>取景</label><select id="framing"></select></div>
     </div>
+
+    <label>姿勢（可複選；不勾＝原本站姿）</label>
+    <div id="poses" class="checks"></div>
 
     <label>尺寸</label>
     <select id="size"></select>
+    <div class="note">尺寸只決定畫布比例；要全身還是半身請用上面的「取景」。</div>
 
     <div class="row">
-      <div><label>張數</label><input type="number" id="count" value="1" min="1" max="8"></div>
+      <div><label>每種姿勢張數</label><input type="number" id="count" value="1" min="1" max="8"></div>
       <div><label>指定 seed（可留空）</label><input type="text" id="seeds" placeholder="例：314159, 271828"></div>
     </div>
+    <div class="note" id="planNote"></div>
 
     <label>參考圖（鎖臉，可不選）</label>
     <input type="file" id="ref" accept="image/*">
     <img id="refPrev" alt="參考圖預覽">
-    <div class="note">參考圖請用你自己的照片或這裡生成過的臉。放了參考圖會改用參考圖編輯模式，每張會變慢。</div>
+    <div class="note">參考圖請用你自己的照片或這裡生成過的臉。放了參考圖會改用參考圖編輯模式，每張會變慢；
+      五官、髮型、膚色交給參考圖，所以「膚色」會停用。</div>
+    <div class="note" id="refHint" hidden>「長相」請選對族裔（例如東亞）——模型預設會畫歐美臉，光靠參考圖拉不回來；
+      選東亞時只有族裔那一句會寫進 prompt。臉要像，建議用 768×1152 這種半身框，全身框的臉太小。</div>
 
     <label>實際送出的 prompt</label>
     <textarea id="prompt" readonly></textarea>
@@ -82,8 +105,10 @@
     <div class="grid" id="grid"></div>
   </section>
 </main>
+<div id="light" hidden><img id="lightImg" alt="放大檢視"></div>
 <script>
 const $ = id => document.getElementById(id);
+const BUILD = '__BUILD__';  // 由後端塞入 index.html 的修改時間，用來偵測瀏覽器拿到舊版頁面
 let refData = null;
 
 function fill(sel, items, key = 'key', label = 'label') {
@@ -99,37 +124,89 @@ async function loadOptions() {
   fill($('skin'), o.skins);
   fill($('bust'), o.busts);
   fill($('face'), o.faces);
-  fill($('pose'), o.poses);
+  fill($('framing'), o.framings);
   fill($('size'), o.sizes);
+  $('poses').innerHTML = o.poses.map(p =>
+    `<label><input type="checkbox" value="${p.key}"${p.key === 'default' ? ' checked' : ''}>${p.label}</label>`).join('');
   $('skin').value = o.default_skin;
+  updatePlan();
   refreshPrompt();
+}
+
+const selectedPoses = () => [...$('poses').querySelectorAll('input:checked')].map(i => i.value);
+
+function updatePlan() {
+  const n = Math.max(1, selectedPoses().length) * Number($('count').value || 1);
+  $('planNote').textContent = `這次會生 ${n} 張（${Math.max(1, selectedPoses().length)} 種姿勢 × ${Number($('count').value || 1)} 張）`;
 }
 
 async function refreshPrompt() {
   const r = await fetch('/api/prompt', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variant: $('variant').value, skin: $('skin').value, bust: $('bust').value,
-                           face: $('face').value, pose: $('pose').value, has_ref: !!refData })
+                           face: $('face').value, pose: selectedPoses()[0] || 'default',
+                           framing: $('framing').value, has_ref: !!refData })
   });
   const d = await r.json();
   $('prompt').value = d.prompt || d.error || '';
 }
 
-['variant', 'skin', 'bust', 'face', 'pose'].forEach(id => $(id).addEventListener('change', refreshPrompt));
+['variant', 'skin', 'bust', 'face', 'framing'].forEach(id => $(id).addEventListener('change', refreshPrompt));
+$('poses').addEventListener('change', () => { updatePlan(); refreshPrompt(); });
+$('count').addEventListener('input', updatePlan);
+
+function syncRef() {
+  // 有參考圖時膚色由參考圖決定，選了也不會生效，直接停用避免誤會。
+  // 「長相」保持可選：有參考圖時只有族裔那句會寫進 prompt（模型不寫族裔就會畫歐美臉）。
+  $('skin').disabled = !!refData;
+  $('refHint').hidden = !refData;
+}
 
 $('ref').addEventListener('change', e => {
   const f = e.target.files[0];
-  if (!f) { refData = null; $('refPrev').style.display = 'none'; refreshPrompt(); return; }
+  if (!f) { refData = null; $('refPrev').style.display = 'none'; syncRef(); refreshPrompt(); return; }
   const fr = new FileReader();
-  fr.onload = () => { refData = fr.result; $('refPrev').src = refData; $('refPrev').style.display = 'block'; refreshPrompt(); };
+  fr.onload = () => {
+    refData = fr.result; $('refPrev').src = refData; $('refPrev').style.display = 'block';
+    syncRef(); refreshPrompt();
+  };
   fr.readAsDataURL(f);
 });
+
+let lastGrid = '';
+function renderGrid(results, running) {
+  const html = (results || []).map(r => `
+    <div><img src="${r.url}" loading="lazy" title="點圖看原尺寸">
+      <div class="cap">seed ${r.seed}・${r.seconds}秒・${r.pose_label ? r.pose_label + '・' : ''}${r.variant}</div>
+      ${r.up_url
+        ? `<a class="up" href="${r.up_url}" target="_blank">已放大 ${r.up_size} ↗</a>`
+        : `<button type="button" class="up" data-path="${r.path}"${running ? ' disabled' : ''}>放大（約 2 倍）</button>`}
+    </div>`).join('');
+  if (html !== lastGrid) { lastGrid = html; $('grid').innerHTML = html; }
+}
+
+$('grid').addEventListener('click', async e => {
+  const img = e.target.closest('img');
+  if (img) { $('lightImg').src = img.src; $('light').hidden = false; return; }
+  const btn = e.target.closest('button.up');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '放大中…';
+  const r = await fetch('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ path: btn.dataset.path }) });
+  const d = await r.json();
+  if (d.error) { $('status').textContent = d.error; $('status').className = 'err'; }
+});
+
+$('light').addEventListener('click', () => { $('light').hidden = true; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('light').hidden = true; });
 
 $('form').addEventListener('submit', async e => {
   e.preventDefault();
   $('go').disabled = true;
   const body = { variant: $('variant').value, model_id: $('model_id').value, skin: $('skin').value,
-                 bust: $('bust').value, face: $('face').value, pose: $('pose').value, size: $('size').value,
+                 bust: $('bust').value, face: $('face').value, poses: selectedPoses(),
+                 framing: $('framing').value, size: $('size').value,
                  count: Number($('count').value), seeds: $('seeds').value, ref: refData };
   const r = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                            body: JSON.stringify(body) });
@@ -143,11 +220,8 @@ async function poll() {
   $('status').textContent = (s.error ? s.error : s.message) + (s.total ? `（${s.done}/${s.total}）` : '') + mem;
   $('status').className = s.error ? 'err' : '';
   $('go').disabled = s.running;
-  if (s.results && s.results.length) {
-    $('grid').innerHTML = s.results.map(r => `
-      <div><a href="${r.url}" target="_blank"><img src="${r.url}" loading="lazy"></a>
-      <div class="cap">seed ${r.seed}・${r.seconds}秒・${r.variant}</div></div>`).join('');
-  }
+  $('stale').hidden = !s.build || String(s.build) === BUILD;
+  renderGrid(s.results, s.running);
   setTimeout(poll, 1500);
 }
 

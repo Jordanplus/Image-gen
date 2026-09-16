@@ -7,7 +7,9 @@
 設計重點：
 - **模型常駐**：同一組（模型＋LoRA＋有無參考圖）只載入一次，之後每張省掉 30–60 秒的載入。
 - 選項直接讀 `recipes/commercial/portrait_style_probe.py` 的寫法與膚色／胸型／長相設定，不另外維護一份。
-- 參考圖從瀏覽器上傳（base64 JSON，不用解 multipart），自動裁臉後交給 FLUX.2 的參考圖編輯版。
+- 參考圖從瀏覽器上傳（base64 JSON，不用解 multipart），自動裁臉後交給 FLUX.2 的參考圖編輯版；
+  有參考圖時 prompt 會改成鎖臉寫法（不寫髮型／五官／膚色，交給參考圖），只開放內建寫法。
+- 產出的圖可以點圖看原尺寸，或按「放大」用 SeedVR2 放到長邊 1536。
 - 只用標準函式庫的 http.server：mflux 的 venv 不必另外裝套件。
 - 每張生成前檢查可用記憶體，低於門檻就拒絕，避免整台卡死（24GB 機器實測 klein-9B 會用到 swap）。
 """
@@ -15,6 +17,7 @@ import base64
 import json
 import mimetypes
 import os
+import queue
 import random
 import re
 import subprocess
@@ -36,7 +39,11 @@ import portrait_style_probe as probe  # noqa: E402
 HOST, PORT = "127.0.0.1", 8770
 OUT_ROOT = Path("outputs/personal_style/gui")
 MIN_FREE_PCT = 15  # 可用記憶體低於這個百分比就不開始生成
-REF_SENTENCE = (" Her face matches the face in the reference image exactly, the same facial features and proportions. ")
+# 放大上限：SeedVR2 的 resolution 參數指的是「短邊」，不是長邊。768×1152 放到 1536×2304 實測可行
+# （112 秒，過程中可用記憶體最低 26%）；直式 704×1216 若照短邊 1536 會變成 1536×2654，比實測還大，
+# 24GB 機器有被系統砍掉的風險，所以改成「最多 2 倍，且輸出像素不超過實測值」。
+UPSCALE_MAX_PIXELS = 1536 * 2304
+UPSCALE_MAX_SCALE = 2.0
 
 # 介面上的模型選單（model 對應 local_models.MODELS；lora 為 None 代表不掛外掛）
 MODELS = [
@@ -53,11 +60,37 @@ if _LOCAL_MODELS.exists():
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     MODELS = list(_mod.EXTRA_MODELS) + MODELS
-SIZES = [("704x1216", "直式全身 704×1216"), ("768x1152", "直式半身 768×1152"), ("1024x1024", "方形 1024×1024")]
+# 尺寸只決定畫布比例，取景由「取景」選項（風格句）決定，所以標籤不再寫全身／半身，免得誤會
+SIZES = [("704x1216", "直式 704×1216"), ("768x1152", "直式 768×1152"), ("1024x1024", "方形 1024×1024")]
 
 _state = dict(running=False, message="待命中", queue=0, done=0, total=0, results=[], error=None, started=None)
 _lock = threading.Lock()
 _loaded = dict(key=None, model=None)
+_jobs = queue.Queue()
+
+
+def _worker():
+    """所有生成／放大都跑在同一條執行緒。
+
+    MLX 的陣列綁在「建立它的那條執行緒」的 stream 上：常駐模型若在 A 執行緒載入、換 B 執行緒拿來用，
+    第二次生成就會炸 `There is no Stream(cpu, 0) in current thread`（2026-09-16 實測：同一組設定連跑
+    兩次必中；之前沒踩到是因為每次都換模型，等於重載一份在新執行緒）。單一 worker 就不會跨執行緒。
+    """
+    while True:
+        kind, payload = _jobs.get()
+        try:
+            (run_job if kind == "generate" else run_upscale)(payload)
+        except Exception as ex:  # noqa: BLE001  worker 不能死，否則之後都不會動
+            _set(message="失敗", error=f"{type(ex).__name__}: {ex}")
+            with _lock:
+                _state["running"] = False
+        finally:
+            _jobs.task_done()
+
+
+def _build():
+    """頁面版本號＝index.html 的修改時間；頁面和後端不一致就代表瀏覽器拿的是舊版。"""
+    return int(Path(__file__).with_name("index.html").stat().st_mtime)
 
 
 def free_pct():
@@ -84,6 +117,18 @@ def get_model(model_key, use, lora, edit):
     return model
 
 
+def prompt_for(job, has_ref):
+    """組 prompt；有參考圖就換成鎖臉寫法（膚色／長相選項此時不生效，由參考圖決定）。
+
+    參考圖鎖臉只開放內建寫法：本機另外載入的寫法不走這條路。
+    """
+    name = job["variant"]
+    if has_ref and name not in probe.BUILTIN_VARIANTS:
+        raise ValueError("這個寫法不支援參考圖鎖臉，請改用內建的寫法，或把參考圖清掉")
+    return probe.build_prompt(probe.VARIANTS[name], True, job["skin"], job["bust"], job["face"], job["pose"],
+                              ref=has_ref, framing=job.get("framing", "default"))
+
+
 def prepare_ref(data_url, out_dir):
     """瀏覽器上傳的圖（data URL）存檔並裁臉，回傳裁好的路徑。"""
     import travel_with_me as tw
@@ -91,45 +136,99 @@ def prepare_ref(data_url, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
     src = out_dir / "upload.jpg"
     src.write_bytes(raw)
-    return tw.prepare_refs([src], out_dir, size=640, face_crop=True)
+    # 768（＝travel_with_me 的預設）比 640 多保留一些五官細節，24GB 機器仍跑得動
+    return tw.prepare_refs([src], out_dir, size=768, face_crop=True)
 
 
 def run_job(job):
     spec = next(m for m in MODELS if m["id"] == job["model_id"])
     width, height = (int(v) for v in job["size"].split("x"))
     seeds = job["seeds"]
+    poses = job["poses"] or ["default"]
+    total = len(poses) * len(seeds)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     out = OUT_ROOT / f"{stamp}_{spec['id']}"
-    variant = probe.VARIANTS[job["variant"]]
-    prompt = probe.build_prompt(variant, True, job["skin"], job["bust"], job["face"], job["pose"])
     refs = []
     try:
+        # 先把每種姿勢的 prompt 都組好（不合法的組合在這裡就擋掉，不用白花時間裁圖）
+        prompts = {po: prompt_for(dict(job, pose=po), bool(job.get("ref"))) for po in poses}
         if job.get("ref"):
             _set(message="處理參考圖（裁臉）…")
             refs = prepare_ref(job["ref"], out / "refs")
-            prompt += REF_SENTENCE
         _set(message="載入模型…" if _loaded["key"] != (spec["model"], spec["lora"], bool(refs)) else "準備生成…")
         model = get_model(spec["model"], spec["use"], spec["lora"], bool(refs))
         neg = probe.negative_for(spec["model"], True)
-        for i, seed in enumerate(seeds, 1):
-            pct = free_pct()
-            if pct is not None and pct < MIN_FREE_PCT:
-                raise RuntimeError(f"可用記憶體只剩 {pct}%，為避免當機停止生成（已完成 {i - 1} 張）")
-            _set(message=f"生成第 {i}/{len(seeds)} 張（seed {seed}）…", done=i - 1, total=len(seeds))
-            t0 = time.time()
-            img = lm.generate(model, spec["model"], prompt=prompt, seed=seed, width=width, height=height,
-                              negative_prompt=neg, image_paths=refs or None)
-            path = lm.save(img, out / f"{seed}.png")
-            rec = dict(seed=seed, seconds=round(time.time() - t0, 1), url=f"/outputs/{path.relative_to('outputs')}",
-                       path=str(path), variant=job["variant"], skin=job["skin"], bust=job["bust"], face=job["face"],
-                       pose=job["pose"], model=spec["id"], size=job["size"], ref=bool(refs))
-            with _lock:
-                _state["results"].insert(0, rec)
-            (out / "results.json").write_text(json.dumps(_state["results"][:len(seeds)], ensure_ascii=False, indent=1),
-                                              encoding="utf-8")
-        _set(message=f"完成 {len(seeds)} 張", done=len(seeds), total=len(seeds))
+        i = 0
+        for po in poses:
+            for seed in seeds:
+                i += 1
+                pct = free_pct()
+                if pct is not None and pct < MIN_FREE_PCT:
+                    raise RuntimeError(f"可用記憶體只剩 {pct}%，為避免當機停止生成（已完成 {i - 1} 張）")
+                label = probe.POSE_PRESETS[po]["label"]
+                _set(message=f"生成第 {i}/{total} 張（{label}・seed {seed}）…", done=i - 1, total=total)
+                t0 = time.time()
+                img = lm.generate(model, spec["model"], prompt=prompts[po], seed=seed, width=width, height=height,
+                                  negative_prompt=neg, image_paths=refs or None)
+                path = lm.save(img, out / (f"{seed}.png" if po == "default" else f"{po}_{seed}.png"))
+                rec = dict(seed=seed, seconds=round(time.time() - t0, 1),
+                           url=f"/outputs/{path.relative_to('outputs')}", path=str(path), variant=job["variant"],
+                           skin=job["skin"], bust=job["bust"], face=job["face"], pose=po, pose_label=label,
+                           framing=job.get("framing", "default"), model=spec["id"], size=job["size"],
+                           ref=bool(refs))
+                with _lock:
+                    _state["results"].insert(0, rec)
+                (out / "results.json").write_text(json.dumps(_state["results"][:total], ensure_ascii=False, indent=1),
+                                                  encoding="utf-8")
+        _set(message=f"完成 {total} 張", done=total, total=total)
     except Exception as ex:  # noqa: BLE001
         _set(message="失敗", error=f"{type(ex).__name__}: {ex}")
+    finally:
+        lm.free()
+        with _lock:
+            _state["running"] = False
+
+
+def upscale_resolution(w, h):
+    """依原圖尺寸算 SeedVR2 的 resolution（＝短邊），回傳 (短邊, 預估輸出尺寸)。"""
+    scale = min(UPSCALE_MAX_SCALE, (UPSCALE_MAX_PIXELS / (w * h)) ** 0.5)
+    short = max(min(w, h), int(min(w, h) * scale))
+    k = short / min(w, h)
+    return short, (int(w * k) // 2 * 2, int(h * k) // 2 * 2)
+
+
+def run_upscale(src_rel):
+    """把介面產出的某一張用 SeedVR2 放大（長邊 UPSCALE_SIDE）。"""
+    try:
+        root = OUT_ROOT.resolve()
+        src = Path(src_rel).resolve()
+        if root not in src.parents or not src.is_file():
+            raise RuntimeError("只能放大這個介面產出的圖")
+        pct = free_pct()
+        if pct is not None and pct < MIN_FREE_PCT:
+            raise RuntimeError(f"可用記憶體只剩 {pct}%，先關掉一些程式再放大")
+        # SeedVR2 要 6.8GB，先把常駐的生圖模型放掉（下一張生成會重新載入，多花 30–60 秒）
+        _set(message="放掉生圖模型，載入放大模型…")
+        _loaded.update(key=None, model=None)
+        lm.free()
+        from PIL import Image
+        with Image.open(src) as im:
+            resolution, target = upscale_resolution(*im.size)
+        t0 = time.time()
+        model = lm.load("seedvr2-3b", "personal", quantize=None, low_ram=True, single_run=True)
+        _set(message=f"放大中（目標 {target[0]}×{target[1]}）…")
+        img = lm.to_pil(model.generate_image(seed=0, image_path=str(src), resolution=resolution)).convert("RGB")
+        model = None
+        lm.free()
+        dst = lm.save(img, src.with_name(f"{src.stem}_x{img.size[0]}.png"))
+        url = f"/outputs/{dst.relative_to(Path('outputs').resolve())}"
+        with _lock:
+            for r in _state["results"]:
+                if Path(r["path"]).resolve() == src:
+                    r.update(up_url=url, up_size=f"{img.size[0]}×{img.size[1]}")
+        _set(message=f"放大完成 {img.size[0]}×{img.size[1]}（{time.time() - t0:.0f} 秒）")
+    except Exception as ex:  # noqa: BLE001
+        _set(message="放大失敗", error=f"{type(ex).__name__}: {ex}")
     finally:
         lm.free()
         with _lock:
@@ -165,9 +264,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            html = (Path(__file__).with_name("index.html")).read_bytes()
+            # 瀏覽器快取住舊頁面會很難察覺（2026-09-16：使用者用舊頁面選姿勢，新版後端收不到而靜靜跑成預設），
+            # 所以一律不給快取，並把版本號（index.html 的修改時間）塞進頁面，跟 /api/status 比對。
+            src = Path(__file__).with_name("index.html")
+            html = src.read_text(encoding="utf-8").replace("__BUILD__", str(_build())).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store, must-revalidate")
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
@@ -179,12 +282,13 @@ class Handler(BaseHTTPRequestHandler):
                        for k in probe.BUST_PRESETS],
                 faces=[dict(key=k, label=v["label"]) for k, v in probe.FACE_PRESETS.items()],
                 poses=[dict(key=k, label=v["label"]) for k, v in probe.POSE_PRESETS.items()],
+                framings=[dict(key=k, label=v["label"]) for k, v in probe.FRAMING_PRESETS.items()],
                 models=[dict(id=m["id"], label=m["label"]) for m in MODELS],
                 sizes=[dict(key=k, label=v) for k, v in SIZES],
                 default_skin=probe.DEFAULT_SKIN["personal"]))
         elif path == "/api/status":
             with _lock:
-                self._json(200, dict(_state, free_pct=free_pct()))
+                self._json(200, dict(_state, free_pct=free_pct(), build=_build()))
         elif path == "/api/gallery":
             self._json(200, dict(items=gallery()))
         elif path.startswith("/outputs/"):
@@ -210,12 +314,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/prompt":
             try:
-                v = probe.VARIANTS[body["variant"]]
-                prompt = probe.build_prompt(v, True, body.get("skin", "fair"), body.get("bust", "default"),
-                                            body.get("face", "default"), body.get("pose", "default"))
-                self._json(200, dict(prompt=prompt + (REF_SENTENCE if body.get("has_ref") else "")))
+                job = dict(variant=body["variant"], skin=body.get("skin", "fair"), bust=body.get("bust", "default"),
+                           face=body.get("face", "default"), pose=body.get("pose", "default"),
+                           framing=body.get("framing", "default"))
+                self._json(200, dict(prompt=prompt_for(job, bool(body.get("has_ref")))))
+            except ValueError as ex:
+                self._json(200, dict(error=str(ex)))
             except KeyError as ex:
                 self._json(400, dict(error=f"未知的設定 {ex}"))
+            return
+        if self.path == "/api/upscale":
+            with _lock:
+                if _state["running"]:
+                    self._json(409, dict(error="已經有工作在跑，等它跑完"))
+                    return
+                _state.update(running=True, message="排隊中…", error=None, done=0, total=0, started=time.time())
+            _jobs.put(("upscale", body.get("path", "")))
+            self._json(200, dict(ok=True))
             return
         if self.path == "/api/generate":
             with _lock:
@@ -228,12 +343,15 @@ class Handler(BaseHTTPRequestHandler):
                 seeds = [int(s) for s in re.split(r"[,\s]+", seeds_raw) if s]
             else:
                 seeds = [random.randint(1, 2**31 - 1) for _ in range(int(body.get("count", 1)))]
+            # 舊版頁面只送單一 pose，沒有 poses；沒接住的話選的姿勢會被靜靜吃掉（2026-09-16 踩過）
+            raw_poses = body.get("poses") or [body.get("pose", "default")]
+            poses = [p for p in raw_poses if p in probe.POSE_PRESETS] or ["default"]
             job = dict(variant=body["variant"], skin=body.get("skin", "fair"), bust=body.get("bust", "default"),
-                       face=body.get("face", "default"), pose=body.get("pose", "default"),
-                       model_id=body.get("model_id", MODELS[0]["id"]),
+                       face=body.get("face", "default"), pose=poses[0], poses=poses,
+                       framing=body.get("framing", "default"), model_id=body.get("model_id", MODELS[0]["id"]),
                        size=body.get("size", "704x1216"), seeds=seeds, ref=body.get("ref"))
-            _set(total=len(seeds))
-            threading.Thread(target=run_job, args=(job,), daemon=True).start()
+            _set(total=len(seeds) * len(poses))
+            _jobs.put(("generate", job))
             self._json(200, dict(ok=True, seeds=seeds))
             return
         self._json(404, dict(error="沒有這個路徑"))
@@ -244,6 +362,7 @@ def main():
     url = f"http://{HOST}:{PORT}/"
     print(f"本機生圖介面：{url}（只綁 127.0.0.1，外面連不到）")
     print(f"寫法 {len(probe.VARIANTS)} 種、膚色 {len(probe.SKIN_PRESETS)} 種；產出在 {OUT_ROOT}")
+    threading.Thread(target=_worker, daemon=True).start()
     if os.environ.get("GUI_NO_OPEN") != "1":
         subprocess.Popen(["open", url])
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

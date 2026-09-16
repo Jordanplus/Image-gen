@@ -30,6 +30,7 @@ STYLE = ("Semi-realistic painted character portrait for a historical strategy ga
          "soft cinematic key light, muted warm palette, head-and-shoulders framing, plain dark backdrop. ")
 HAIR = "Her chestnut hair is pinned up at the back of the head, a few loose strands at the temples. "
 IDENTITY = "A 24-year-old woman, the daughter of a sixteenth-century Lisbon chart-maker. "
+NEUTRAL_IDENTITY = "A 24-year-old woman. "  # 選了族裔時改用這句（見 build_prompt）
 FACE = "Strong level brows with a high clean arch, set well apart. "
 SKIN = ("Flawless skin in one single even clean tone, a healthy warm glow, a soft matte finish, "
         "bright clear eyes with crisp catchlights, beautiful appealing features.")
@@ -75,6 +76,8 @@ VARIANTS = {
         extra=EXPRESSION),
 }
 
+BUILTIN_VARIANTS = tuple(VARIANTS)  # 內建（進版控）的寫法名稱，要在載入本機寫法之前記下來
+
 # 不進版控的本機寫法（repo 是公開的）：接在上面四種之後，輸出檔名的編號照順序往後排。
 _LOCAL_VARIANTS = Path(__file__).with_name("portrait_variants_local.py")
 if _LOCAL_VARIANTS.exists():
@@ -93,6 +96,35 @@ PAINTED_LEAD = "Semi-realistic painted character portrait for a historical strat
 # 身形微調：接在身形句後面（LESSONS §2 描述衣服底下的身體）。default＝照原寫法。
 # 長相類型（不綁定任何真人，只用五官描述）：face 取代預設五官句，hair 有寫就一併取代髮型句。
 # 姿勢（2026-09-16 使用者要 12 種）：取代身形句裡的預設站姿；不指定就完全照舊。
+# 取景（2026-09-16 使用者：「選全身都只出來半身」）：取景是寫法的風格句決定的，不是輸出尺寸決定的。
+# 「原版高領（對照）」寫的是 head-and-shoulders framing，配 704×1216 也只會出頭肩。這裡讓取景可以單獨指定。
+FRAMING_PRESETS = {
+    "default": dict(label="照寫法", text=None),
+    "full": dict(label="全身（頭到腳）", text="full-length framing from head to toe, her whole body and her feet in frame"),
+    "threequarter": dict(label="七分身（大腿以上）", text="three-quarter framing from head to mid-thigh"),
+    "waist": dict(label="半身（腰以上）", text="waist-up framing"),
+    "head": dict(label="頭肩", text="head-and-shoulders framing"),
+}
+_FRAMING_RE = re.compile(r"(?:head-and-shoulders|waist-up|full-length|three-quarter) framing(?: from head to toe)?")
+# 只換取景片語不夠：服裝句還寫著「bare legs, white sneakers」、身形句寫著「long slender shapely legs」，
+# 燈光句寫著「across her bare shoulders and legs」，三句都在喊腿，模型就會退遠拍全身（2026-09-16 實測，
+# 取景選半身仍出全身、臉太小所以鎖不住）。選半身／頭肩時，把描述腿腳鞋的子句一起拿掉。
+_LEG_WORDS = re.compile(r"\b(?:legs?|feet|barefoot|sneakers)\b", re.I)
+# 有主詞或動作的子句要留著：「She stands with her weight on one leg」是姿勢不是在描述腿，
+# 砍掉會把句子切壞（實測會留下「, one knee slightly bent.」這種殘句）。
+_ACTION_WORDS = re.compile(r"\b(?:she|stands?|sits?|kneels?|lies|leans?|wears?|crossed|folded|propped)\b", re.I)
+_CLOSE_FRAMINGS = ("waist", "head")
+
+
+def _drop_leg_clauses(text):
+    """拿掉「描述腿腳鞋」的子句，保留有主詞／動作的句子，並把標點接回去。"""
+    out = []
+    for sent in re.findall(r"[^.]+\.\s*", text):
+        clauses = [c.strip() for c in sent.strip().rstrip(".").split(",")]
+        keep = [c for c in clauses if c and not (_LEG_WORDS.search(c) and not _ACTION_WORDS.search(c))]
+        if keep:
+            out.append(", ".join(keep) + ". ")
+    return "".join(out)
 DEFAULT_POSE = "She stands with her weight on one leg, one knee slightly bent. "
 POSE_PRESETS = {
     "default": dict(label="原本站姿", text=DEFAULT_POSE),
@@ -108,13 +140,29 @@ POSE_PRESETS = {
     "prone": dict(label="趴臥", text="She lies face down on a low bed, propped up on her forearms, ankles crossed in the air. "),
     "stretch": dict(label="踮腳伸展", text="She stands on tiptoe, arms stretched high above her head, back gently arched. "),
 }
+# 長相類型（不綁定任何真人，只用五官描述）。ethnic＝族裔短句：prompt 不寫族裔時 klein 一律畫歐美臉
+# （2026-09-16 使用者回饋「應該是東方人」），所以東亞選項多一句；有參考圖時只有這句會用到，
+# 其餘五官與髮型全部交給參考圖。
+_EAST_ASIAN = "She is a young East Asian woman with East Asian facial features. "
 FACE_PRESETS = {
-    "default": dict(label="原本", face=None, hair=None),
+    "default": dict(label="原本", face=None, hair=None, ethnic=None),
     "fringe": dict(label="齊瀏海褐眼",
                    face=("An oval face with soft delicate features, high cheekbones, hazel-green eyes with a direct "
                          "gaze, and full natural lips. "),
                    hair=("Her long dark-blonde hair is loosely pinned up, with a soft blunt fringe falling to her "
-                         "eyebrows and a few loose strands framing her face. ")),
+                         "eyebrows and a few loose strands framing her face. "),
+                   ethnic=None),
+    "east_asian": dict(label="東亞・黑長髮",
+                       face=(_EAST_ASIAN + "A softly oval face with smooth delicate features, high cheekbones, "
+                             "dark almond-shaped eyes with a direct gaze, and full natural lips. "),
+                       hair="Her long straight black hair falls loosely past her shoulders. ",
+                       ethnic=_EAST_ASIAN),
+    "east_asian_fringe": dict(label="東亞・齊瀏海",
+                              face=(_EAST_ASIAN + "A softly oval face with smooth delicate features, high cheekbones, "
+                                    "dark almond-shaped eyes with a direct gaze, and full natural lips. "),
+                              hair=("Her long straight black hair falls past her shoulders, with a soft blunt fringe "
+                                    "falling to her eyebrows. "),
+                              ethnic=_EAST_ASIAN),
 }
 BUST_PRESETS = {
     "default": "",
@@ -124,6 +172,14 @@ BUST_PRESETS = {
     "huge": ("Her bust is extremely large and heavy yet firm, sitting high on her chest with a deep cleavage, a "
              "pronounced round upper curve and a strong lift. "),
 }
+# 參考圖鎖臉（GUI 上傳參考圖時用）。2026-09-16 實測：照原本的寫法接一句「臉要跟參考圖一樣」沒有用，
+# 髮色、五官都跑掉——因為 prompt 裡本來就有髮型句（栗色盤髮）、五官句、膚色句，字面描述會蓋過參考圖。
+# 所以有參考圖時直接不寫這幾句，長相全部交給參考圖，只留風格、服裝、身形。
+# 用 FLUX.2 編輯版慣用的「image 1」講法（travel_with_me.build_prompt 也是這樣寫），比「the reference image」明確。
+REF_LEAD = "A photo of the exact same woman as the person shown in image 1, the same face and the same hair. "
+REF_TAIL = ("Keep her face, face shape, eyes, eyebrows, nose, mouth, hair colour, hairstyle, skin tone and age "
+            "identical to the person in image 1. Real camera photo, natural light, sharp focus on the face, "
+            "bright clear eyes with crisp catchlights.")
 DEFAULT_SKIN = {"commercial": "clean", "personal": "fair"}
 SKIN_PRESETS = {
     "natural": dict(label="自然紋理", lead="Photorealistic portrait photograph, natural skin texture", skin=SKIN),
@@ -149,19 +205,37 @@ QUALITY_NEGATIVE = "blurry, low quality, deformed face, deformed hands, extra fi
 PAINT_NEGATIVE = "painting, oil painting, illustration, drawing, cartoon, anime, 3d render, cgi, plastic skin"
 
 
-def build_prompt(v, photo=False, skin="clean", bust="default", face="default", pose="default"):
+def build_prompt(v, photo=False, skin="clean", bust="default", face="default", pose="default", ref=False,
+                 framing="default"):
     # LESSONS §1 的段落順序：風格 → 服裝 → 髮型 → 身形 → 身分 → 臉 → 神情 → 膚質
     preset = SKIN_PRESETS[skin]
     fp = FACE_PRESETS[face]
     style = v["style"].replace(PAINTED_LEAD, preset["lead"]) if photo else v["style"]
     for old, new in preset.get("style_swaps", ()):
         style = style.replace(old, new)
-    body = v["body"]
+    if framing != "default":
+        text = FRAMING_PRESETS[framing]["text"]
+        style, n = _FRAMING_RE.subn(text, style)
+        if not n:  # 風格句沒寫取景就補一句
+            style += text[0].upper() + text[1:] + ". "
+    body, clothing = v["body"], v["clothing"]
+    if framing in _CLOSE_FRAMINGS:
+        # 取景拉近時，描述腿腳鞋的句子要一起拿掉，否則模型會為了把腿放進畫面而退遠拍全身
+        clothing = _drop_leg_clauses(clothing)
+        body = _drop_leg_clauses(body)
+        style = style.replace(" across her bare shoulders and legs", " across her bare shoulders")
     if pose != "default":
         # 換姿勢時先拿掉原本的站姿句（各寫法的句尾不一定一樣，用整句比對會漏掉），避免兩個姿勢並存
         body = re.sub(r"She stands with her weight on one leg[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
-    return (style + v["clothing"] + (fp["hair"] or HAIR) + body + BUST_PRESETS[bust]
-            + v.get("identity", IDENTITY) + (fp["face"] or FACE) + v["extra"] + preset["skin"])
+    if ref:
+        # 長相交給參考圖：髮型、五官、身分、膚色句全部不寫（會蓋過參考圖）。只留族裔短句，
+        # 因為 prompt 不寫族裔時模型會照自己的預設畫歐美臉，光靠參考圖拉不回來。
+        return (REF_LEAD + (fp.get("ethnic") or "") + style + clothing + body + BUST_PRESETS[bust]
+                + v["extra"] + REF_TAIL)
+    # 族裔與預設身分句（里斯本製圖師的女兒）會打架，選了族裔就換成不指出身的身分句
+    identity = v.get("identity") or (NEUTRAL_IDENTITY if fp.get("ethnic") else IDENTITY)
+    return (style + clothing + (fp["hair"] or HAIR) + body + BUST_PRESETS[bust]
+            + identity + (fp["face"] or FACE) + v["extra"] + preset["skin"])
 
 
 def negative_for(key, photo):
@@ -238,9 +312,13 @@ def main():
                     help="膚質寫法，逗號分隔可一次比多種：clean（商用預設）、fair（白皙＋中性光，個人預設）、"
                          "porcelain（瓷白＋冷光）、beauty（美妝級）、natural（自然紋理，Z-Image-Turbo 會有雀斑）")
     ap.add_argument("--bust", default="default", choices=list(BUST_PRESETS), help="身形微調：full＝豐滿堅挺，fuller＝更大更高，huge＝再更大")
-    ap.add_argument("--face", default="default", choices=list(FACE_PRESETS), help="長相類型：fringe＝齊瀏海、褐綠色眼睛、深金褐長髮")
+    ap.add_argument("--face", default="default", choices=list(FACE_PRESETS),
+                    help="長相類型：fringe＝齊瀏海、褐綠色眼睛、深金褐長髮；east_asian＝東亞黑長髮、"
+                         "east_asian_fringe＝東亞齊瀏海")
     ap.add_argument("--pose", default="default",
                     help="姿勢，逗號分隔可一次跑多種，all＝全部 12 種：" + "、".join(POSE_PRESETS))
+    ap.add_argument("--framing", default="default", choices=list(FRAMING_PRESETS),
+                    help="取景：full＝全身、threequarter＝七分身、waist＝半身、head＝頭肩（預設照寫法的風格句）")
     ap.add_argument("--low-ram", action="store_true",
                     help="MLX 快取上限 1GB＋VAE 分塊解碼（24GB 機器跑大模型用）")
     ap.add_argument("--dry-run", action="store_true", help="只印計畫與 prompt，不載模型")
@@ -282,11 +360,12 @@ def main():
     d = lm.MODELS[key]["defaults"]
     print(f"== {key}（{lm.MODELS[key]['license']}）· 用途 {a.use} · {len(names)} 種寫法 × {len(skins)} 種膚質 × {len(poses)} 種姿勢 × {len(seeds)} 顆 seed = "
           f"{len(rows) * len(seeds)} 張 · {width}x{height} · steps {d.get('steps')} · guidance {d.get('guidance')} · "
-          f"{'照片風' if photo else '原風格句'} · 膚質 {','.join(skins)} · 身形 {a.bust} · 長相 {a.face} · 姿勢 {','.join(poses)}")
+          f"{'照片風' if photo else '原風格句'} · 膚質 {','.join(skins)} · 身形 {a.bust} · 長相 {a.face} · "
+          f"姿勢 {','.join(poses)} · 取景 {a.framing}")
     print(f"== LoRA：{f'{a.lora}（強度 {a.lora_scale}）' if a.lora else '無'}")
     print(f"== 負面提示詞：{neg or '（蒸餾模型不吃）'}")
     for n, sk, po, row in rows:
-        print(f"-- {row}：{build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po)}")
+        print(f"-- {row}：{build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po, framing=a.framing)}")
     if a.dry_run:
         return
 
@@ -298,11 +377,12 @@ def main():
                     lora_scales=[a.lora_scale] if lora_path else None)
     results, cells = [], {}
     for n, sk, po, row in rows:
-        prompt = build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po)
+        prompt = build_prompt(VARIANTS[n], photo, sk, a.bust, a.face, po, framing=a.framing)
         for seed in seeds:
             t1 = time.time()
             rec = dict(**lm.license_record(key), use=a.use, lora=a.lora, lora_scale=a.lora_scale if a.lora else None,
-                       photo_style=photo, skin=sk, bust=a.bust, face=a.face, pose=po, variant=n, seed=seed, width=width, height=height, prompt=prompt,
+                       photo_style=photo, skin=sk, bust=a.bust, face=a.face, pose=po, framing=a.framing,
+                       variant=n, seed=seed, width=width, height=height, prompt=prompt,
                        negative_prompt=neg, steps=d.get("steps"), guidance=d.get("guidance"))
             try:
                 img = lm.generate(model, key, prompt=prompt, seed=seed, width=width, height=height,

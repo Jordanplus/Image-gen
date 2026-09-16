@@ -91,6 +91,10 @@
 - SeedVR2-3B（套相容修補）：1024² → 1536² 共 70 秒，MLX 峰值記憶體 18GB（24GB 機器上不能和其他模型同時跑）。
   和 LANCZOS 拉伸並排看（`outputs/mflux_check/seedvr2_vs_lanczos_detail.png`）：睫毛、虹膜紋路、眉毛、毛孔**明顯補出細節**；
   皮膚紋理略偏銳利，必要時調 `softness`（0–1）。它也會把原有的斑點放大得更清楚，所以修圖流程是「先修再放大」。
+- **SeedVR2 的 `resolution` 參數是「短邊」不是長邊**（`seedvr2/variants/upscale/seedvr2_util.py` 的 `preprocess_image`：
+  `scale = target_res / min(w, h)`）。直式圖若照長邊的直覺給 1536，實際會放到 1536×2654（4.1 百萬像素），比實測過的還大。
+  生圖介面的放大鈕因此改成「最多 2 倍，且輸出像素不超過 3.54 百萬」：
+  實測 768×1152 → 1536×2304 共 112 秒、過程中可用記憶體最低 26%；704×1216 → 1408×2432 共 103 秒、最低 21%（2026-09-16）。
 
 ### 已知問題與規避
 - **FLUX.2 沒開放負面提示詞**：`mflux-generate-flux2(-edit)` 會拒收 `--negative-prompt`；程式內部把負面詞寫死成空白，但 guidance>1（非蒸餾 base 版）仍會做 CFG。要自訂負面詞請用 `local_models.load()`（包裝依賴 mflux 內部 `_encode_prompt_pair`，0.18.0／0.19.1 驗證）。
