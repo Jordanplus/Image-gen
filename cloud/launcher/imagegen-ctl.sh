@@ -20,7 +20,8 @@ URL="https://mcgradysmac-mini.tail43cdaa.ts.net"
 SRV_PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$VENV/bin"
 # 關鍵：用 LaunchAgent（GUI domain）跑 uvicorn，行程才在你的登入 session 裡、claude -p 才
 # 讀得到 Keychain 的訂閱憑證（舊的 nohup 背景版脫離 session → claude 讀不到會卡住逾時）。
-PLIST="$HOME/Library/LaunchAgents/com.imagegen.server.plist"
+# plist 放在專案目錄而非 ~/Library/LaunchAgents，避免開機登入時 macOS 自動啟動服務。
+PLIST="$REPO/launcher/com.imagegen.server.plist"
 LABEL="com.imagegen.server"
 GUI="gui/$(id -u)"
 
@@ -66,7 +67,9 @@ write_plist() {
   # 讓 server.py 的 subprocess 找得到 claude；PYTHONUNBUFFERED 讓 log 即時。
   local cctok_line=""
   [ -s "$CCTOKFILE" ] && cctok_line="    <key>CLAUDE_CODE_OAUTH_TOKEN</key><string>$(cat "$CCTOKFILE")</string>"
-  mkdir -p "$HOME/Library/LaunchAgents"
+  # 清理舊版在 ~/Library/LaunchAgents 的殘留，避免 Mac 開機自動啟動
+  rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
+  mkdir -p "$REPO/launcher"
   cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -115,6 +118,8 @@ start() {
 stop() {
   # 卸載 LaunchAgent（連 KeepAlive 一起停）；Funnel 留著（指向死 port 只回 502，不曝露東西）。
   launchctl bootout "$GUI/$LABEL" 2>/dev/null
+  # 確保移除舊版 ~/Library/LaunchAgents 開機自啟 plist
+  rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
   # 保險：清掉任何殘留佔 port 的 uvicorn（含舊 nohup 版），確保真的停了。
   /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null
   # 也關掉本地 klein worker（若在跑）→ 釋放 ~7-8GB RAM

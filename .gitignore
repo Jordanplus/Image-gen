@@ -5,6 +5,7 @@ humming
 *.env
 .env
 .dev.vars
+cloud/launcher/*.plist
 
 # ============================================================
 #  Environments / third-party (huge, not our code)
