@@ -74,19 +74,20 @@
 
     <div class="row">
       <div><label>膚色調性 <span style="color:#8ab4f8; font-size:11px; font-weight:normal;">（可覆蓋參考圖泛黃）</span></label><select id="skin"></select></div>
-      <div><label>胸型</label><select id="bust"></select></div>
+      <div><label>身材比例 <span style="color:#8ab4f8; font-size:11px; font-weight:normal;">（頭身腿黃金比）</span></label><select id="proportion"></select></div>
     </div>
     <div class="row">
+      <div><label>胸型</label><select id="bust"></select></div>
       <div><label>長相／髮型</label><select id="face"></select></div>
-      <div><label>取景</label><select id="framing"></select></div>
     </div>
+    <div class="row">
+      <div><label>取景</label><select id="framing"></select></div>
+      <div><label>尺寸</label><select id="size"></select></div>
+    </div>
+    <div class="note" style="margin-top:-2px; margin-bottom:8px;">尺寸決定畫布長寬；全身／七分／半身或特寫請選「取景」。</div>
 
     <label>姿勢（可複選；不勾＝原本站姿）</label>
     <div id="poses" class="checks"></div>
-
-    <label>尺寸</label>
-    <select id="size"></select>
-    <div class="note">尺寸只決定畫布比例；要全身還是半身請用上面的「取景」。</div>
 
     <div class="row">
       <div><label>每種姿勢張數</label><input type="number" id="count" value="1" min="1" max="8"></div>
@@ -230,6 +231,8 @@ async function loadOptions() {
   fill($('skin'), o.skins);
   fill($('bust'), o.busts);
   fill($('face'), o.faces);
+  fill($('proportion'), o.proportions);
+  if (o.default_proportion) $('proportion').value = o.default_proportion;
   fill($('framing'), o.framings);
   fill($('size'), o.sizes);
   if (o.hardware && o.hardware.default_size) {
@@ -264,6 +267,7 @@ async function refreshPrompt() {
   const r = await fetch('/api/prompt', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variant: $('variant').value, skin: $('skin').value, bust: $('bust').value,
+                           proportion: $('proportion').value,
                            face: $('face').value, pose: selectedPoses()[0] || 'default',
                            framing: $('framing').value, has_ref: count > 0, ref_count: count })
   });
@@ -271,7 +275,7 @@ async function refreshPrompt() {
   $('prompt').value = d.prompt || d.error || '';
 }
 
-['variant', 'skin', 'bust', 'face', 'framing'].forEach(id => $(id).addEventListener('change', () => {
+['variant', 'skin', 'bust', 'face', 'proportion', 'framing'].forEach(id => $(id).addEventListener('change', () => {
   if ($('variant').value.includes('自訂')) {
     $('customPromptLock').checked = true;
   }
@@ -352,7 +356,8 @@ $('form').addEventListener('submit', async e => {
   $('go').disabled = true;
   const isCustom = $('customPromptLock').checked || $('variant').value.includes('自訂');
   const body = { variant: $('variant').value, model_id: $('model_id').value, skin: $('skin').value,
-                 bust: $('bust').value, face: $('face').value, poses: selectedPoses(),
+                 bust: $('bust').value, face: $('face').value, proportion: $('proportion').value,
+                 poses: selectedPoses(),
                  framing: $('framing').value, size: $('size').value,
                  count: Number($('count').value), seeds: $('seeds').value, refs: getSelectedRefs(),
                  custom_prompt: isCustom ? $('prompt').value : null };

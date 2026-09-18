@@ -126,11 +126,13 @@ def get_model(model_key, use, lora, edit):
 
 
 def prompt_for(job, has_ref):
-    """組 prompt；有參考圖時鎖臉五官神情，並尊重使用者所選膚色覆蓋老照片的偏黃底色。"""
+    """組 prompt；有參考圖時鎖臉五官神情，並尊重使用者所選膚色覆蓋老照片的偏黃底色，加入身材比例約束。"""
     skin_key = job.get("skin") or probe.DEFAULT_SKIN["personal"]
     if skin_key not in probe.SKIN_PRESETS:
         skin_key = probe.DEFAULT_SKIN["personal"]
     preset = probe.SKIN_PRESETS[skin_key]
+    prop_key = job.get("proportion") or "golden_8head"
+    prop_text = probe.PROPORTION_PRESETS.get(prop_key, probe.PROPORTION_PRESETS["golden_8head"])["text"]
 
     custom = (job.get("custom_prompt") or "").strip()
     if custom:
@@ -140,13 +142,13 @@ def prompt_for(job, has_ref):
             ref_lead = f"A photo of the exact same person as shown in {refs_str}, identical face and hair. "
             ref_tail = (f" Keep facial features, facial contours, eyes, eyebrows, nose, mouth, hair colour, hairstyle "
                         f"and facial likeness completely identical to {refs_str}. "
-                        f"Her skin tone and complexion is: {preset['skin']} Natural candid pose, real camera photo, sharp focus.")
+                        f"{prop_text}Her skin tone and complexion is: {preset['skin']} Natural candid pose, real camera photo, sharp focus.")
             return f"{ref_lead}{custom}.{ref_tail}"
         return custom
 
     name = job["variant"]
     return probe.build_prompt(probe.VARIANTS[name], True, skin_key, job["bust"], job["face"], job["pose"],
-                              ref=has_ref, framing=job.get("framing", "default"))
+                              ref=has_ref, framing=job.get("framing", "default"), proportion=prop_key)
 
 
 def prepare_refs(refs_spec, out_dir):
@@ -429,6 +431,8 @@ class Handler(BaseHTTPRequestHandler):
                 variants=list(probe.VARIANTS),
                 skins=[dict(key=k, label=v["label"]) for k, v in probe.SKIN_PRESETS.items()],
                 busts=[dict(key=k, label=bust_labels.get(k, k)) for k in probe.BUST_PRESETS],
+                proportions=[dict(key=k, label=v["label"]) for k, v in probe.PROPORTION_PRESETS.items()],
+                default_proportion="golden_8head",
                 faces=[dict(key=k, label=v["label"]) for k, v in probe.FACE_PRESETS.items()],
                 poses=[dict(key=k, label=v["label"]) for k, v in probe.POSE_PRESETS.items()],
                 framings=[dict(key=k, label=v["label"]) for k, v in probe.FRAMING_PRESETS.items()],
@@ -477,6 +481,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/prompt":
             try:
                 job = dict(variant=body["variant"], skin=body.get("skin", probe.DEFAULT_SKIN["personal"]), bust=body.get("bust", "default"),
+                           proportion=body.get("proportion", "golden_8head"),
                            face=body.get("face", "default"), pose=body.get("pose", "default"),
                            framing=body.get("framing", "default"), custom_prompt=body.get("custom_prompt"))
                 ref_count = int(body.get("ref_count", 0)) if body.get("has_ref") else 0
@@ -510,6 +515,7 @@ class Handler(BaseHTTPRequestHandler):
             raw_poses = body.get("poses") or [body.get("pose", "default")]
             poses = [p for p in raw_poses if p in probe.POSE_PRESETS] or ["default"]
             job = dict(variant=body["variant"], skin=body.get("skin", probe.DEFAULT_SKIN["personal"]), bust=body.get("bust", "default"),
+                       proportion=body.get("proportion", "golden_8head"),
                        face=body.get("face", "default"), pose=poses[0], poses=poses,
                        framing=body.get("framing", "default"), model_id=body.get("model_id", MODELS[0]["id"]),
                        size=body.get("size", "704x1216"), seeds=seeds,

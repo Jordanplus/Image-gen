@@ -293,6 +293,34 @@ BUST_PRESETS = {
     "maximum": ("Her bust is extraordinarily massive, lush and heavy, exceptionally voluptuous with deep cleavage and "
                 "an ultra-pronounced curve. "),
 }
+PROPORTION_PRESETS = {
+    "golden_8head": dict(
+        label="八頭身超模（黃金比例·小頭長腿）★推薦",
+        text=("Perfect golden ratio fashion model proportions, a petite delicate head relative to a tall slender "
+              "statuesque physique, long graceful neck, high natural waistline, and exceptionally long slender shapely legs, "
+              "flawless 8-head-tall anatomical silhouette. ")
+    ),
+    "supermodel_9head": dict(
+        label="九頭身極致修長（伸展台超模·極致美腿）",
+        text=("Ultra-elongated haute couture runway model proportions, an exceptionally small delicate head and face, "
+              "long slender neck, high cinched waist, and extraordinarily long slender shapely legs, dramatic 9-head-tall "
+              "supermodel silhouette. ")
+    ),
+    "natural_balanced": dict(
+        label="自然勻稱（標緻和諧·真實美感）",
+        text=("Naturally well-proportioned feminine silhouette, balanced head-to-body ratio, graceful natural curves "
+              "and slender shapely legs with harmonious anatomical proportions. ")
+    ),
+    "petite_slender": dict(
+        label="嬌小苗條（精巧骨架·優雅比例）",
+        text=("Petite yet beautifully proportioned frame, delicate small head, slim waist and slender shapely legs "
+              "with graceful natural proportions. ")
+    ),
+    "default": dict(
+        label="照寫法預設",
+        text=""
+    ),
+}
 ## 參考圖鎖臉（GUI 上傳參考圖時用）。
 # 修正（2026-09-18）：老底片掃描（如蘇菲·瑪索 90 年代劇照）本身帶有嚴重鎢絲燈偏黃底色。
 # 鎖臉詞嚴格鎖定「五官、輪廓、眼神、髮色、髮型與面部神韻」，而將膚色權限保留給使用者所選膚色 preset，
@@ -395,12 +423,14 @@ SKIN_PRESETS = {
               "beautiful appealing features.")
     ),
 }
-QUALITY_NEGATIVE = "blurry, low quality, deformed limbs, deformed legs, extra legs, extra limbs, bad anatomy, deformed face, deformed hands, extra fingers, watermark, text"
+QUALITY_NEGATIVE = ("blurry, low quality, oversized head, big head, short legs, long torso, disproportionate body, "
+                    "stubby limbs, deformed limbs, deformed legs, extra legs, extra limbs, bad anatomy, "
+                    "deformed face, deformed hands, extra fingers, watermark, text")
 PAINT_NEGATIVE = "painting, oil painting, illustration, drawing, cartoon, anime, 3d render, cgi, plastic skin"
 
 
 def build_prompt(v, photo=False, skin="cold_white", bust="default", face="default", pose="default", ref=False,
-                 framing="default"):
+                 framing="default", proportion="golden_8head"):
     # LESSONS §1 的段落順序：風格 → 服裝 → 髮型 → 身形 → 身分 → 臉 → 神情 → 膚質
     preset = SKIN_PRESETS.get(skin, SKIN_PRESETS["cold_white"])
     fp = FACE_PRESETS[face]
@@ -414,15 +444,21 @@ def build_prompt(v, photo=False, skin="cold_white", bust="default", face="defaul
         style, n = _FRAMING_RE.subn(text, style)
         if not n:  # 風格句沒寫取景就補一句
             style += text[0].upper() + text[1:] + ". "
+
+    prop_obj = PROPORTION_PRESETS.get(proportion, PROPORTION_PRESETS["golden_8head"])
+    prop_text = prop_obj["text"]
+
     body, clothing = v["body"], v["clothing"]
     if framing in _CLOSE_FRAMINGS:
         clothing = _drop_leg_clauses(clothing)
         body = _drop_leg_clauses(body)
+        prop_text = _drop_leg_clauses(prop_text)
         style = style.replace(" across her bare shoulders and legs", " across her bare shoulders")
     if pose != "default":
         body = re.sub(r"(She stands with her weight on one leg|She stands relaxed against a gentle ocean breeze|He stands with hands casually resting near his suit pockets|He stands comfortably)[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
 
     bust_clause = "" if is_male else BUST_PRESETS[bust]
+    body_with_prop = (prop_text + body) if not is_male else body
 
     if ref:
         n = ref if (isinstance(ref, int) and ref > 1) else 1
@@ -432,7 +468,7 @@ def build_prompt(v, photo=False, skin="cold_white", bust="default", face="defaul
                     f"and facial likeness completely identical to {refs_str}. Natural candid pose, real camera photo, "
                     f"sharp focus.")
         skin_clause = f"Her skin tone and complexion is: {preset['skin']} "
-        return (ref_lead + (fp.get("ethnic") or "") + style + clothing + body + bust_clause
+        return (ref_lead + (fp.get("ethnic") or "") + style + clothing + body_with_prop + bust_clause
                 + skin_clause + v["extra"] + ref_tail)
 
     if is_male:
@@ -446,7 +482,7 @@ def build_prompt(v, photo=False, skin="cold_white", bust="default", face="defaul
         identity = v.get("identity") or (NEUTRAL_IDENTITY if fp.get("ethnic") else IDENTITY)
         skin_clause = preset["skin"]
 
-    return (style + clothing + hair_clause + body + bust_clause
+    return (style + clothing + hair_clause + body_with_prop + bust_clause
             + identity + face_clause + v["extra"] + skin_clause)
 
 
