@@ -146,7 +146,18 @@
   </form>
 
   <section>
-    <div id="status">待命中</div>
+    <div id="statusWrap" style="margin-bottom: 14px;">
+      <div id="status" style="margin-bottom:0;">待命中</div>
+      <div id="progressWrap" style="display:none; margin-top:8px; background:#1c1c1c; border-radius:8px; padding:10px 14px; border:1px solid #2a2a2a;">
+        <div style="display:flex; justify-content:space-between; font-size:12px; color:#8ab4f8; margin-bottom:6px; font-weight:500;">
+          <span id="progressLabel">處理中…</span>
+          <span id="progressPct" style="font-family:monospace; font-size:13px; font-weight:bold;">0%</span>
+        </div>
+        <div style="background:#111; border-radius:6px; overflow:hidden; height:10px; border:1px solid #333;">
+          <div id="progressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #3b7dd8, #8ab4f8); border-radius:5px; transition:width 0.3s ease;"></div>
+        </div>
+      </div>
+    </div>
     <div class="grid" id="grid"></div>
   </section>
 </main>
@@ -353,11 +364,36 @@ $('form').addEventListener('submit', async e => {
 
 async function poll() {
   const s = await (await fetch('/api/status')).json();
-  const mem = s.free_pct == null ? '' : `｜可用記憶體 ${s.free_pct}%`;
+  const mem = s.free_pct == null ? '' : ` ｜ 可用記憶體 ${s.free_pct}%`;
   $('status').textContent = (s.error ? s.error : s.message) + (s.total ? `（${s.done}/${s.total}）` : '') + mem;
   $('status').className = s.error ? 'err' : '';
   $('go').disabled = s.running;
   $('stale').hidden = !s.build || String(s.build) === BUILD;
+
+  // 進度條即時更新
+  if (s.running) {
+    $('progressWrap').style.display = 'block';
+    const pct = Math.min(100, Math.max(0, s.pct != null ? s.pct : 0));
+    $('progressBar').style.width = pct + '%';
+    $('progressPct').textContent = pct + '%';
+    if (s.step_total) {
+      $('progressLabel').textContent = `第 ${s.done + 1}/${s.total} 張 · 降噪步數 ${s.step}/${s.step_total} 步`;
+    } else {
+      $('progressLabel').textContent = s.message || '處理中…';
+    }
+  } else {
+    if (s.done && s.done === s.total && s.total > 0) {
+      $('progressBar').style.width = '100%';
+      $('progressPct').textContent = '100%';
+      $('progressLabel').textContent = '✓ 所有圖片已生成完成！';
+      setTimeout(() => {
+        if (!$('go').disabled) $('progressWrap').style.display = 'none';
+      }, 4000);
+    } else {
+      $('progressWrap').style.display = 'none';
+    }
+  }
+
   renderGrid(s.results, s.running);
   setTimeout(poll, 1500);
 }

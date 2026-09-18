@@ -69,7 +69,7 @@ SIZES = [
     ("1536x1024", "高解析橫式 1536×1024 (32GB 原生)"),
 ]
 
-_state = dict(running=False, message="待命中", queue=0, done=0, total=0, results=[], error=None, started=None)
+_state = dict(running=False, message="待命中", queue=0, done=0, total=0, results=[], error=None, started=None, step=0, step_total=0, pct=0)
 _lock = threading.Lock()
 _loaded = dict(key=None, model=None)
 _jobs = queue.Queue()
@@ -197,28 +197,39 @@ def run_job(job):
     try:
         raw_refs = job.get("refs") or ([job["ref"]] if job.get("ref") else [])
         if raw_refs:
-            _set(message=f"處理參考圖（{len(raw_refs)} 張·1024px 高清裁臉鎖定）…")
+            _set(message=f"處理參考圖（{len(raw_refs)} 張·1024px 高清裁臉鎖定）…", pct=2)
             refs = prepare_refs(raw_refs, out / "refs")
 
         n_refs = len(refs)
         # 先把每種姿勢的 prompt 都組好（帶入實際參考圖張數，動態組裝 image 1, image 2... 鎖臉詞）
         prompts = {po: prompt_for(dict(job, pose=po), n_refs if n_refs > 0 else False) for po in poses}
-        _set(message="載入模型…" if _loaded["key"] != (spec["model"], spec["lora"], bool(refs)) else "準備生成…")
+        _set(message="載入模型…" if _loaded["key"] != (spec["model"], spec["lora"], bool(refs)) else "準備生成…", pct=4)
         model = get_model(spec["model"], spec["use"], spec["lora"], bool(refs))
         neg = probe.negative_for(spec["model"], True)
         i = 0
         for po in poses:
             for seed in seeds:
                 i += 1
-                pct = free_pct()
-                if pct is not None and pct < MIN_FREE_PCT:
-                    raise RuntimeError(f"可用記憶體只剩 {pct}%，為避免當機停止生成（已完成 {i - 1} 張）")
+                cur_img = i
+                pct_mem = free_pct()
+                if pct_mem is not None and pct_mem < MIN_FREE_PCT:
+                    raise RuntimeError(f"可用記憶體只剩 {pct_mem}%，為避免當機停止生成（已完成 {i - 1} 張）")
                 label = probe.POSE_PRESETS[po]["label"]
                 lock_text = f"【極致鎖臉 {n_refs} 圖】" if n_refs else ""
-                _set(message=f"生成第 {i}/{total} 張{lock_text}（{label}・seed {seed}）…", done=i - 1, total=total)
+                base_pct = int(((cur_img - 1) / total) * 100)
+                _set(message=f"生成第 {cur_img}/{total} 張{lock_text}（{label}・seed {seed}）…",
+                     done=cur_img - 1, total=total, step=0, step_total=4, pct=base_pct)
+
+                def _step_cb(cur_step, total_steps, status_text, img_idx=cur_img):
+                    step_fraction = (cur_step / total_steps) if total_steps else 0
+                    calc_pct = int(((img_idx - 1 + step_fraction) / total) * 100)
+                    _set(message=f"生成第 {img_idx}/{total} 張{lock_text}（{label}・seed {seed}）… {status_text}",
+                         done=img_idx - 1, total=total, step=cur_step, step_total=total_steps,
+                         pct=min(99, max(0, calc_pct)))
+
                 t0 = time.time()
                 img = lm.generate(model, spec["model"], prompt=prompts[po], seed=seed, width=width, height=height,
-                                  negative_prompt=neg, image_paths=refs or None)
+                                  negative_prompt=neg, image_paths=refs or None, step_callback=_step_cb)
                 path = lm.save(img, out / (f"{seed}.png" if po == "default" else f"{po}_{seed}.png"))
                 rec = dict(seed=seed, seconds=round(time.time() - t0, 1),
                            url=f"/outputs/{path.relative_to('outputs')}", path=str(path), variant=job["variant"],
@@ -229,7 +240,8 @@ def run_job(job):
                     _state["results"].insert(0, rec)
                 (out / "results.json").write_text(json.dumps(_state["results"][:total], ensure_ascii=False, indent=1),
                                                   encoding="utf-8")
-        _set(message=f"完成 {total} 張", done=total, total=total)
+                _set(done=i, total=total, pct=int((i / total) * 100))
+        _set(message=f"完成 {total} 張", done=total, total=total, step=0, step_total=0, pct=100)
     except Exception as ex:  # noqa: BLE001
         _set(message="失敗", error=f"{type(ex).__name__}: {ex}")
     finally:
@@ -270,7 +282,7 @@ def run_upscale(src_rel):
         supir_runner = ROOT / "recipes" / "upscale_supir.py"
         dst = src.with_name(f"{src.stem}_supir_2x.png")
 
-        _set(message="啟動 SUPIR 放大引擎…")
+        _set(message="啟動 SUPIR 放大引擎…", pct=10)
         t0 = time.time()
         cmd = [
             str(supir_py),
@@ -295,7 +307,8 @@ def run_upscale(src_rel):
         while proc.poll() is None:
             time.sleep(2)
             elapsed = int(time.time() - t0)
-            _set(message=f"SUPIR 重建修復與放大中（已耗時 {elapsed} 秒）…")
+            est_pct = min(95, 20 + int(elapsed * 2.5))
+            _set(message=f"SUPIR 重建修復與放大中（已耗時 {elapsed} 秒）…", pct=est_pct)
 
         ret = proc.returncode
         stdout, _ = proc.communicate()
@@ -310,7 +323,7 @@ def run_upscale(src_rel):
             for r in _state["results"]:
                 if Path(r["path"]).resolve() == src:
                     r.update(up_url=url, up_size=f"{up_w}×{up_h}")
-        _set(message=f"SUPIR 放大完成 {up_w}×{up_h}（{time.time() - t0:.0f} 秒）")
+        _set(message=f"SUPIR 放大完成 {up_w}×{up_h}（{time.time() - t0:.0f} 秒）", pct=100)
     except Exception as ex:  # noqa: BLE001
         _set(message="放大失敗", error=f"{type(ex).__name__}: {ex}")
     finally:

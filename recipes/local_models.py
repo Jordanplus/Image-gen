@@ -286,7 +286,7 @@ def load(key, use, quantize=None, edit=False, low_ram=False, single_run=False,
 
 
 def generate(model, key, *, prompt, seed, width, height, steps=None, guidance=None,
-             negative_prompt=None, image_paths=None):
+             negative_prompt=None, image_paths=None, step_callback=None):
     """統一的生成呼叫；步數與 guidance 沒指定時用 MODELS 裡的預設。"""
     m = MODELS[key]
     d = m["defaults"]
@@ -300,7 +300,35 @@ def generate(model, key, *, prompt, seed, width, height, steps=None, guidance=No
                   guidance=guidance)
         if image_paths:
             kw["image_paths"] = [str(p) for p in image_paths]
-        return model.generate_image(**kw)
+
+        cb = None
+        if step_callback and hasattr(model, "callbacks"):
+            class _StepProgressCallback:
+                def call_before_loop(self, seed, prompt, latents, config, **kwargs):
+                    step_callback(0, config.num_inference_steps, "開始降噪…")
+
+                def call_in_loop(self, t, seed, prompt, latents, config, time_steps=None, **kwargs):
+                    cur = getattr(time_steps, "n", None)
+                    if cur is None:
+                        cur = t + 1 if isinstance(t, int) else 1
+                    step_callback(cur, config.num_inference_steps, f"降噪中（第 {cur}/{config.num_inference_steps} 步）")
+
+                def call_after_loop(self, seed, prompt, latents, config, **kwargs):
+                    step_callback(config.num_inference_steps, config.num_inference_steps, "解碼影像中…")
+
+            cb = _StepProgressCallback()
+            model.callbacks.register(cb)
+
+        try:
+            return model.generate_image(**kw)
+        finally:
+            if cb and hasattr(model, "callbacks"):
+                if cb in getattr(model.callbacks, "in_loop", []):
+                    model.callbacks.in_loop.remove(cb)
+                if cb in getattr(model.callbacks, "before_loop", []):
+                    model.callbacks.before_loop.remove(cb)
+                if cb in getattr(model.callbacks, "after_loop", []):
+                    model.callbacks.after_loop.remove(cb)
     if m["kind"] in ("z_image", "qwen"):
         if image_paths:
             raise SystemExit(f"✗ {key} 不支援參考圖")

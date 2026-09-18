@@ -24,7 +24,9 @@
   - **新增「往前傾趴臥（`prone_forward`）」**：上身手肘支撐向前傾、弓背挺胸直視鏡頭。
   - **新增「趴在前方透明玻璃上（`glass_press`）」**：雙手手掌與胸口貼緊鏡頭前方透明玻璃，帶有清透倒影與微貼壓高光。
   - **新增「跪姿前傾（`kneel_lean`）」**：跪地雙手前撐、弓腰前俯視角。
-  - 負面詞補強 `deformed limbs, deformed legs, extra legs, extra limbs, bad anatomy` 防護。
+- **介面新增「即時動態進度條」**：
+  - 串接 `mflux` 內核 `CallbackRegistry`，即時向後端回報 FLUX 降噪步數（例如 `第 1/4 步`、`第 2/4 步`）與批次張數總進度。
+  - GUI 即時渲染漸層動態進度條、完成百分比（`%`）與當前處理步驟提示，生成完畢平滑過渡。
 - **ComfyUI 獨立環境準備**：
   - 建立 Python 3.11 MPS 虛擬環境 (`venv`)，配置 `ComfyUI_PuLID_Flux_ll` 與 `ComfyUI-GGUF`。
 
