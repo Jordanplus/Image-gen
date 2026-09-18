@@ -1,5 +1,27 @@
 # status.md
 
+## 2026-09-18：32GB M5 MacBook Pro 極致鎖臉（多圖特徵錨定）與無審查生圖架構落地
+- **極致鎖臉架構升級（Multi-Reference Face Locking）**：
+  - 以蘇菲·瑪索（Sophie Marceau）為基準測試資料，確立「正面高清主基準（`ref-03.jpeg`）＋ 側顏立體（`ref-01.jpg`）＋ 視角骨相（`ref-04.jpeg`）」最佳 3 圖互補黃金組合。
+  - `recipes/commercial/portrait_style_probe.py` 升級支援動態多圖約束語法（`images 1, 2 and 3: keep identity, facial features, jawline identical to references`）。
+  - 自動以 1024px 高清臉部裁切進行 Vision Encoder 交叉注意力錨定，徹底杜絕單圖在換姿勢時出現的臉盲與特徵漂移。
+- **無審查能力實裝與落地（Uncensored Pipeline）**：
+  - 成功於本機下載並掛載 `darknight9121/FLUX.2-klein-base-9B-bucket-uncensored` 無審查 Text Encoder（16.4GB 完整快取於 `~/.cache/huggingface/hub/`）。
+  - 解除提示詞限制，完美直出大膽寫實寫真（如「性感蕾絲睡袍」、「微光半透真絲」、「濕身微透白襯衫」、「比基尼泳裝」等）。
+  - 實測產出：`outputs/personal_style/gui/20260918_101844_klein-9b-uncensored/42.png`（768×1152，3 圖鎖臉，神韻五官精準還原，蕾絲透膚解剖結構自然，可用記憶體維持 37% 充裕）。
+- **`make gui` 本機介面全面升級**：
+  - 內建 `reference/` 圖庫快速勾選（預設選中「蘇菲·瑪索 3 圖經典鎖臉組」）與本機照片多選上傳（最多 3 張）。
+  - 預覽卡片即時呈現縮圖與特徵鎖定狀態徽章（`🔒 已鎖定 3 張特徵 · 1024px 高清裁臉`）。
+  - 預設推薦模型直接切換為 `klein-9b-uncensored`（8-bit 無審查·32GB 原生）。
+- **膚色調性修復與多樣性擴充（8 款細分膚色）**：
+  - 根治參考圖模式下膚色偏黃問題：五官輪廓與膚色解耦（鎖臉不再強鎖 90 年代老底片泛黃底色），白皙系自動置換環境暖光為清爽中性/冷調日光。
+  - 擴充為 8 種細分膚色（極致冷白皮 ★預設、櫻花粉白、自然白皙、柔焦瓷白、暖白象牙、原生自然、乾淨膚質、陽光小麥）。
+  - GUI 介面保持膚色下拉選單可用並支援自由覆蓋。
+- **介面新增「🛑 關閉伺服器」功能**：
+  - 介面右上角新增關閉按鈕，點擊二度確認後向後端 `/api/shutdown` 發送請求，安全終止背景 Python 服務並完整釋放 Apple Silicon 統一記憶體。
+- **ComfyUI 獨立環境準備**：
+  - 建立 Python 3.11 MPS 虛擬環境 (`venv`)，配置 `ComfyUI_PuLID_Flux_ll` 與 `ComfyUI-GGUF`。
+
 ## 2026-09-16：mflux 升級 0.19.1、解鎖 32GB M5 8-bit 與無審查設定、雙機型自動偵測適配
 - **mflux 升級**：升級至 `v0.19.1`（搭配 `mlx 0.32.2`、`torch 2.14.0`、`huggingface-hub 1.31.0`）。
 - **32GB M5 MacBook Pro 解鎖**：

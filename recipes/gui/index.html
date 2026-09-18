@@ -8,9 +8,12 @@
   :root { color-scheme: dark; }
   body { margin: 0; font: 15px/1.6 -apple-system, "PingFang TC", "Hiragino Sans GB", sans-serif;
          background: #141414; color: #eee; }
-  header { padding: 14px 20px; border-bottom: 1px solid #2a2a2a; display: flex; gap: 14px; align-items: baseline; }
+  header { padding: 14px 20px; border-bottom: 1px solid #2a2a2a; display: flex; justify-content: space-between; align-items: center; }
+  header .brand { display: flex; gap: 14px; align-items: center; }
   header h1 { font-size: 17px; margin: 0; }
   header span { color: #888; font-size: 13px; }
+  #shutdownBtn { margin: 0; width: auto; padding: 6px 14px; font-size: 13px; font-weight: 500; background: #331f1f; color: #ff9999; border: 1px solid #552828; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+  #shutdownBtn:hover { background: #552222 !important; border-color: #883333 !important; color: #ffcccc !important; }
   main { display: grid; grid-template-columns: 340px 1fr; gap: 20px; padding: 20px; align-items: start; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
   .panel { background: #1c1c1c; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; }
@@ -51,10 +54,15 @@
 </style>
 </head>
 <header>
-  <h1>本機生圖</h1>
-  <span id="hw" style="font-size:12px; background:#1e2d45; color:#8ab4f8; padding:2px 10px; border-radius:12px; font-weight:500;"></span>
-  <span id="mem">只跑在這台 Mac，外面連不到</span>
-  <span id="stale" style="color:#ffb4b4" hidden>⚠ 這是舊版頁面，請按 ⌘R 重新整理</span>
+  <div class="brand">
+    <h1>本機生圖</h1>
+    <span id="hw" style="font-size:12px; background:#1e2d45; color:#8ab4f8; padding:2px 10px; border-radius:12px; font-weight:500;"></span>
+    <span id="mem">只跑在這台 Mac，外面連不到</span>
+    <span id="stale" style="color:#ffb4b4" hidden>⚠ 這是舊版頁面，請按 ⌘R 重新整理</span>
+  </div>
+  <div>
+    <button type="button" id="shutdownBtn" title="結束背景 Python 伺服器並釋放記憶體">🛑 關閉伺服器</button>
+  </div>
 </header>
 <main>
   <form class="panel" id="form">
@@ -65,7 +73,7 @@
     <select id="model_id"></select>
 
     <div class="row">
-      <div><label>膚色</label><select id="skin"></select></div>
+      <div><label>膚色調性 <span style="color:#8ab4f8; font-size:11px; font-weight:normal;">（可覆蓋參考圖泛黃）</span></label><select id="skin"></select></div>
       <div><label>胸型</label><select id="bust"></select></div>
     </div>
     <div class="row">
@@ -86,16 +94,53 @@
     </div>
     <div class="note" id="planNote"></div>
 
-    <label>參考圖（鎖臉，可不選）</label>
-    <input type="file" id="ref" accept="image/*">
-    <img id="refPrev" alt="參考圖預覽">
-    <div class="note">參考圖請用你自己的照片或這裡生成過的臉。放了參考圖會改用參考圖編輯模式，每張會變慢；
-      五官、髮型、膚色交給參考圖，所以「膚色」會停用。</div>
-    <div class="note" id="refHint" hidden>「長相」請選對族裔（例如東亞）——模型預設會畫歐美臉，光靠參考圖拉不回來；
-      選東亞時只有族裔那一句會寫進 prompt。臉要像，建議用 768×1152 這種半身框，全身框的臉太小。</div>
+    <label>參考圖（極致鎖臉，支援 1～3 張互補視角）</label>
+    <div style="background:#111; border:1px solid #333; border-radius:6px; padding:10px 12px; margin-bottom:8px;">
+      <div style="display:flex; flex-direction:column; gap:7px; font-size:13px;">
+        <label style="margin:0; display:flex; align-items:center; gap:6px; cursor:pointer; color:#8ab4f8; font-weight:600;">
+          <input type="radio" name="ref_mode" value="preset_combo" checked>
+          ★ 蘇菲·瑪索 (Sophie Marceau) 經典 3 圖鎖臉（ref-03 正面基準 ＋ ref-01 側顏 ＋ ref-04）
+        </label>
+        <label style="margin:0; display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="radio" name="ref_mode" value="custom_preset">
+          自選 reference/ 圖庫（勾選 1～3 張）
+        </label>
+        <label style="margin:0; display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="radio" name="ref_mode" value="upload">
+          自行上傳照片（可多選 1～3 張）
+        </label>
+        <label style="margin:0; display:flex; align-items:center; gap:6px; cursor:pointer; color:#888;">
+          <input type="radio" name="ref_mode" value="none">
+          不使用參考圖（純文字提示詞）
+        </label>
+      </div>
 
-    <label>實際送出的 prompt</label>
-    <textarea id="prompt" readonly></textarea>
+      <!-- 自選 reference/ 圖庫勾選清單 -->
+      <div id="customPresetArea" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid #222;">
+        <div style="font-size:12px; color:#aaa; margin-bottom:6px;">請勾選 1～3 張（以正面為準搭配側顏）：</div>
+        <div id="presetChecks" style="display:grid; grid-template-columns:repeat(2, 1fr); gap:5px; max-height:160px; overflow-y:auto; font-size:12px;"></div>
+      </div>
+
+      <!-- 上傳區 -->
+      <div id="uploadArea" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid #222;">
+        <input type="file" id="refUpload" accept="image/*" multiple style="font-size:12px;">
+        <div class="note">提示：按住 Command 或 Shift 可多選最多 3 張圖片。</div>
+      </div>
+
+      <!-- 預覽縮圖區 -->
+      <div id="refPrevContainer" style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;"></div>
+      <div id="refLockBadge" style="font-size:12px; color:#4ade80; margin-top:6px; font-weight:500;">
+        🔒 已啟用極致鎖臉：3 張參考特徵（正面主基準 ＋ 側顏 ＋ 視角）· 1024px 高清裁臉
+      </div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin: 14px 0 4px;">
+      <label style="margin:0; font-weight:600; color:#eee;">實際送出的 Prompt（可自由編輯無審查詞）</label>
+      <label style="margin:0; font-size:12px; color:#8ab4f8; display:flex; align-items:center; gap:4px; cursor:pointer; font-weight:500;">
+        <input type="checkbox" id="customPromptLock"> 鎖定自訂內容（不被選單覆蓋）
+      </label>
+    </div>
+    <textarea id="prompt" placeholder="可直接編輯或輸入任何無審查 Prompt（例如 topless, nude fine art, sensual lingerie, sheer silk...）"></textarea>
+    <div class="note" style="color:#aaa;">🔥 無審查已啟用：可直接在此輸入或修改任何大膽寫真/人體關鍵詞；若有選取上方參考圖，系統會自動在送出時保持臉部鎖定！</div>
 
     <button type="submit" id="go">生成</button>
   </form>
@@ -109,12 +154,59 @@
 <script>
 const $ = id => document.getElementById(id);
 const BUILD = '__BUILD__';  // 由後端塞入 index.html 的修改時間，用來偵測瀏覽器拿到舊版頁面
-let refData = null;
+let currentRefMode = 'preset_combo';
+let presetRefsList = [];
+let uploadRefsData = [];
 
 function fill(sel, items, key = 'key', label = 'label') {
   sel.innerHTML = items.map(i => typeof i === 'string'
     ? `<option value="${i}">${i}</option>`
     : `<option value="${i[key]}">${i[label]}</option>`).join('');
+}
+
+function getSelectedRefs() {
+  if (currentRefMode === 'preset_combo') {
+    return ['reference/ref-03.jpeg', 'reference/ref-01.jpg', 'reference/ref-04.jpeg'];
+  }
+  if (currentRefMode === 'custom_preset') {
+    return [...document.querySelectorAll('#presetChecks input:checked')].map(i => i.value);
+  }
+  if (currentRefMode === 'upload') {
+    return uploadRefsData;
+  }
+  return [];
+}
+
+function updateRefPreview() {
+  const refs = getSelectedRefs();
+  const container = $('refPrevContainer');
+  container.innerHTML = '';
+  if (refs.length === 0) {
+    $('refLockBadge').style.display = 'none';
+    syncRef();
+    refreshPrompt();
+    return;
+  }
+
+  refs.forEach((r, idx) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'position:relative; width:80px; height:80px; border-radius:6px; overflow:hidden; border:1px solid #3b7dd8; background:#222; box-shadow:0 2px 5px rgba(0,0,0,0.5);';
+    const img = document.createElement('img');
+    img.src = r.startsWith('data:') ? r : ('/' + r);
+    img.style.cssText = 'width:100%; height:100%; object-fit:cover; display:block;';
+    const tag = document.createElement('span');
+    tag.style.cssText = 'position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.8); color:#8ab4f8; font-size:10px; text-align:center; padding:1px 2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; font-weight:500;';
+    const name = r.startsWith('data:') ? `上傳 ${idx+1}` : r.split('/').pop();
+    tag.textContent = name.includes('ref-03') ? '★正面基準' : (name.includes('ref-01') ? '側顏立體' : (name.includes('ref-04') ? '3/4視角' : name));
+    card.appendChild(img);
+    card.appendChild(tag);
+    container.appendChild(card);
+  });
+
+  $('refLockBadge').style.display = 'block';
+  $('refLockBadge').textContent = `🔒 已鎖定 ${refs.length} 張特徵 · 1024px 高清裁臉鎖定`;
+  syncRef();
+  refreshPrompt();
 }
 
 async function loadOptions() {
@@ -135,6 +227,14 @@ async function loadOptions() {
   $('poses').innerHTML = o.poses.map(p =>
     `<label><input type="checkbox" value="${p.key}"${p.key === 'default' ? ' checked' : ''}>${p.label}</label>`).join('');
   $('skin').value = o.default_skin;
+
+  if (o.preset_refs && o.preset_refs.length) {
+    presetRefsList = o.preset_refs;
+    $('presetChecks').innerHTML = o.preset_refs.map(p =>
+      `<label><input type="checkbox" value="${p.path}"${p.default_selected ? ' checked' : ''}>${p.label}</label>`).join('');
+  }
+
+  updateRefPreview();
   updatePlan();
   refreshPrompt();
 }
@@ -147,36 +247,65 @@ function updatePlan() {
 }
 
 async function refreshPrompt() {
+  if ($('customPromptLock') && $('customPromptLock').checked) return;
+  const refs = getSelectedRefs();
+  const count = refs.length;
   const r = await fetch('/api/prompt', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variant: $('variant').value, skin: $('skin').value, bust: $('bust').value,
                            face: $('face').value, pose: selectedPoses()[0] || 'default',
-                           framing: $('framing').value, has_ref: !!refData })
+                           framing: $('framing').value, has_ref: count > 0, ref_count: count })
   });
   const d = await r.json();
   $('prompt').value = d.prompt || d.error || '';
 }
 
-['variant', 'skin', 'bust', 'face', 'framing'].forEach(id => $(id).addEventListener('change', refreshPrompt));
+['variant', 'skin', 'bust', 'face', 'framing'].forEach(id => $(id).addEventListener('change', () => {
+  if ($('variant').value.includes('自訂')) {
+    $('customPromptLock').checked = true;
+  }
+  refreshPrompt();
+}));
 $('poses').addEventListener('change', () => { updatePlan(); refreshPrompt(); });
 $('count').addEventListener('input', updatePlan);
 
+$('prompt').addEventListener('input', () => {
+  $('customPromptLock').checked = true;
+});
+$('customPromptLock').addEventListener('change', () => {
+  if (!$('customPromptLock').checked) refreshPrompt();
+});
+
 function syncRef() {
-  // 有參考圖時膚色由參考圖決定，選了也不會生效，直接停用避免誤會。
-  // 「長相」保持可選：有參考圖時只有族裔那句會寫進 prompt（模型不寫族裔就會畫歐美臉）。
-  $('skin').disabled = !!refData;
-  $('refHint').hidden = !refData;
+  // 保持膚色選單永遠可用：即使鎖臉參考圖，也能自由指定冷白皮／粉白／自然白等覆蓋老照片泛黃
+  $('skin').disabled = false;
 }
 
-$('ref').addEventListener('change', e => {
-  const f = e.target.files[0];
-  if (!f) { refData = null; $('refPrev').style.display = 'none'; syncRef(); refreshPrompt(); return; }
-  const fr = new FileReader();
-  fr.onload = () => {
-    refData = fr.result; $('refPrev').src = refData; $('refPrev').style.display = 'block';
-    syncRef(); refreshPrompt();
-  };
-  fr.readAsDataURL(f);
+document.querySelectorAll('input[name="ref_mode"]').forEach(radio => {
+  radio.addEventListener('change', e => {
+    currentRefMode = e.target.value;
+    $('customPresetArea').style.display = (currentRefMode === 'custom_preset') ? 'block' : 'none';
+    $('uploadArea').style.display = (currentRefMode === 'upload') ? 'block' : 'none';
+    updateRefPreview();
+  });
+});
+
+$('presetChecks').addEventListener('change', () => {
+  if (currentRefMode === 'custom_preset') updateRefPreview();
+});
+
+$('refUpload').addEventListener('change', async e => {
+  const files = [...e.target.files].slice(0, 3);
+  uploadRefsData = [];
+  for (const f of files) {
+    const d = await new Promise(res => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.readAsDataURL(f);
+    });
+    uploadRefsData.push(d);
+  }
+  updateRefPreview();
 });
 
 let lastGrid = '';
@@ -210,10 +339,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $('light').h
 $('form').addEventListener('submit', async e => {
   e.preventDefault();
   $('go').disabled = true;
+  const isCustom = $('customPromptLock').checked || $('variant').value.includes('自訂');
   const body = { variant: $('variant').value, model_id: $('model_id').value, skin: $('skin').value,
                  bust: $('bust').value, face: $('face').value, poses: selectedPoses(),
                  framing: $('framing').value, size: $('size').value,
-                 count: Number($('count').value), seeds: $('seeds').value, ref: refData };
+                 count: Number($('count').value), seeds: $('seeds').value, refs: getSelectedRefs(),
+                 custom_prompt: isCustom ? $('prompt').value : null };
   const r = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                            body: JSON.stringify(body) });
   const d = await r.json();
@@ -230,6 +361,36 @@ async function poll() {
   renderGrid(s.results, s.running);
   setTimeout(poll, 1500);
 }
+
+$('shutdownBtn').addEventListener('click', async () => {
+  if (!confirm('確定要關閉本機伺服器嗎？\n\n關閉後背景 Python 程式將完全停止，並釋放所有記憶體。\n若有正在生成的任務將會停止。')) {
+    return;
+  }
+  $('shutdownBtn').disabled = true;
+  $('shutdownBtn').textContent = '正在關閉…';
+  try {
+    const res = await fetch('/api/shutdown', { method: 'POST' });
+    const d = await res.json();
+    document.body.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-family:-apple-system, sans-serif; text-align:center; padding:20px; box-sizing:border-box;">
+        <div style="font-size:52px; margin-bottom:16px;">🛑</div>
+        <h2 style="color:#ffb4b4; margin:0 0 10px; font-size:22px;">本機伺服器已成功關閉</h2>
+        <p style="color:#aaa; max-width:440px; margin:0 0 24px; font-size:14px; line-height:1.6;">後台 Python 服務與 GPU 矩陣運算已停止，系統記憶體已完整釋放。</p>
+        <div style="color:#888; font-size:13px; background:#1c1c1c; padding:12px 20px; border-radius:8px; border:1px solid #2a2a2a;">
+          您可以直接關閉此瀏覽器分頁。<br>下次若需使用，在終端機輸入 <code>make gui</code> 即可重新開啟。
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    document.body.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-family:-apple-system, sans-serif; text-align:center;">
+        <div style="font-size:52px; margin-bottom:16px;">🛑</div>
+        <h2 style="color:#ffb4b4; margin:0 0 10px;">伺服器已離線停止</h2>
+        <p style="color:#888;">您可以直接關閉此瀏覽器分頁。</p>
+      </div>
+    `;
+  }
+});
 
 loadOptions();
 poll();

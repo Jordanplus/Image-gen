@@ -76,28 +76,46 @@ VARIANTS = {
         extra=EXPRESSION),
 
     # 無審查 / 大膽性感系列（個人自用）
-    "性感蕾絲睡袍": dict(
+    "【無審查】全裸藝術人體寫真": dict(
+        style=STYLE.replace("soft cinematic key light", "dramatic artistic chiaroscuro fine art lighting, soft shadows contouring the body")
+                   .replace("head-and-shoulders framing", "three-quarter artistic fine art nude portrait"),
+        clothing="She is completely nude with no clothes, fully uncovered bare skin, natural fine art nudity. ",
+        body="Bare smooth shoulders, natural bare breasts, graceful collarbones, slender toned waist and natural feminine curves. ",
+        extra=EXPRESSION),
+    "【無審查】上空微光臥室寫真": dict(
+        style=STYLE.replace("soft cinematic key light", "moody intimate bedroom lighting, warm morning sunlight grazing bare skin")
+                   .replace("head-and-shoulders framing", "three-quarter framing from waist up"),
+        clothing="She is topless, wearing only sheer silk lounge bottoms, bare upper body with exposed bare breasts. ",
+        body="Smooth bare shoulders, uncovered bare breasts, narrow cinched waist, and graceful collarbones. ",
+        extra=EXPRESSION),
+    "【無審查】私密浴室濕身寫真": dict(
+        style=STYLE.replace("soft cinematic key light", "steamy luxury marble bathroom lighting, soft mist and glistening water droplets")
+                   .replace("head-and-shoulders framing", "three-quarter framing"),
+        clothing="She is completely nude stepping out of a bath, wet damp skin with glistening water droplets, no clothing. ",
+        body="Glistening wet skin, bare shoulders, natural bare breasts, slender waist, and sculpted feminine body. ",
+        extra=EXPRESSION),
+    "【無審查】性感黑蕾絲睡袍": dict(
         style=STYLE.replace("soft cinematic key light", "moody intimate bedroom lighting with soft warm highlights")
                    .replace("head-and-shoulders framing", "three-quarter framing"),
         clothing=("She wears a translucent black floral lace slip with delicate thin spaghetti straps, "
                   "the sheer fabric draped softly over her curves, revealing hints of her silhouette beneath. "),
         body="Bare smooth shoulders, delicate collarbones, a narrow cinched waist, and a shapely feminine figure. ",
         extra=EXPRESSION),
-    "微光半透真絲": dict(
+    "【無審查】微光半透真絲": dict(
         style=STYLE.replace("soft cinematic key light", "soft morning sunlight streaming through sheer curtains, gentle lens bloom")
                    .replace("head-and-shoulders framing", "three-quarter framing"),
         clothing=("She wears an open champagne-hued semi-sheer silk chiffon robe slipping off her bare shoulders, "
                   "unbuttoned at the chest to reveal her décolletage and cleavage. "),
         body="Smooth bare shoulders, glowing skin, a slender waist, and a full voluptuous bust. ",
         extra=EXPRESSION),
-    "濕身微透白襯衫": dict(
+    "【無審查】濕身微透白襯衫": dict(
         style=STYLE.replace("soft cinematic key light", "natural diffused daylight, crisp details with subtle rim light")
                    .replace("head-and-shoulders framing", "three-quarter framing"),
         clothing=("She wears an oversized damp white cotton dress shirt unbuttoned low down the chest, "
                   "the semi-translucent wet fabric clinging delicately to her skin and contouring her bust. "),
         body="Bare collarbones, a narrow waist, full bust visible through damp fabric, upright poised posture. ",
         extra=EXPRESSION),
-    "比基尼泳裝・微風": dict(
+    "【無審查】比基尼泳裝・微風": dict(
         style=STYLE.replace("soft cinematic key light", "golden hour sun-drenched beach lighting, soft sea spray")
                    .replace("head-and-shoulders framing", "full-length framing from head to toe"),
         clothing=("She wears a minimalist chic emerald green triangle string bikini, "
@@ -105,20 +123,25 @@ VARIANTS = {
         body=("Sun-kissed smooth skin, athletic slender waist, toned abdomen, full shapely bust, "
               "and long shapely legs. She stands relaxed against a gentle ocean breeze. "),
         extra=EXPRESSION),
-    "深V露背晚禮服": dict(
+    "【無審查】深V露背晚禮服": dict(
         style=STYLE.replace("soft cinematic key light", "dramatic luxury architectural ballroom lighting, golden bokeh")
                    .replace("head-and-shoulders framing", "full-length framing from head to toe"),
         clothing=("She wears an alluring midnight-blue velvet evening gown cut with a daringly deep plunging V-neckline "
                   "down to her navel and an open back, with a high slit revealing her leg. "),
         body="Graceful posture, narrow cinched waist, full firm bust, smooth sculpted back, and long bare legs. ",
         extra=EXPRESSION),
-    "極致貼身針織裙": dict(
+    "【無審查】極致貼身針織裙": dict(
         style=STYLE.replace("soft cinematic key light", "warm contemporary penthouse interior lighting, soft ambient glow")
                    .replace("head-and-shoulders framing", "three-quarter framing"),
         clothing=("She wears an ultra-tight off-shoulder ribbed bodycon knit mini dress hugging every curve of her body, "
                   "accentuating her bust and hips. "),
         body="Sculpted hourglass silhouette, narrow waist, full round bust, smooth bare collarbones and shoulders. ",
         extra=EXPRESSION),
+    "【自訂】自訂自由提示詞": dict(
+        style="Photorealistic photograph, natural light, real camera photo. ",
+        clothing="",
+        body="",
+        extra=""),
 
     # 男士正裝（2026-09-16 使用者要男士西裝選項）
     "男士商務正裝西裝": dict(
@@ -267,40 +290,116 @@ BUST_PRESETS = {
     "maximum": ("Her bust is extraordinarily massive, lush and heavy, exceptionally voluptuous with deep cleavage and "
                 "an ultra-pronounced curve. "),
 }
-# 參考圖鎖臉（GUI 上傳參考圖時用）。2026-09-16 實測：照原本的寫法接一句「臉要跟參考圖一樣」沒有用，
-# 一定要開頭結尾夾攻＋把會衝突的五官／膚色／髮型全部拿掉，只留族裔。
+## 參考圖鎖臉（GUI 上傳參考圖時用）。
+# 修正（2026-09-18）：老底片掃描（如蘇菲·瑪索 90 年代劇照）本身帶有嚴重鎢絲燈偏黃底色。
+# 鎖臉詞嚴格鎖定「五官、輪廓、眼神、髮色、髮型與面部神韻」，而將膚色權限保留給使用者所選膚色 preset，
+# 避免強行複製參考圖泛黃色調。
 REF_LEAD = "A photo of the exact same woman as the person shown in image 1, the same face and the same hair. "
-REF_TAIL = ("Keep her face, face shape, eyes, eyebrows, nose, mouth, hair colour, hairstyle, skin tone and age "
-            "completely identical to image 1. Natural candid pose, real camera photo, natural lighting, sharp focus.")
-DEFAULT_SKIN = {"commercial": "clean", "personal": "fair"}
+REF_TAIL = ("Keep her facial features, facial contours, eyes, eyebrows, nose, mouth, hair colour, hairstyle "
+            "and facial likeness completely identical to image 1. Natural candid pose, real camera photo, "
+            "sharp focus.")
+DEFAULT_SKIN = {"commercial": "clean", "personal": "cold_white"}
 SKIN_PRESETS = {
-    "natural": dict(label="自然紋理", lead="Photorealistic portrait photograph, natural skin texture", skin=SKIN),
-    "clean": dict(label="乾淨膚質", lead="Photorealistic portrait photograph", skin=SKIN),
-    "beauty": dict(label="美妝級膚質", lead="Photorealistic high-end beauty photograph, professionally retouched",
-                   skin=("Smooth, clear, even-toned porcelain skin with a soft satin glow and a flawless complexion, "
-                         "soft diffused beauty light, bright clear eyes with crisp catchlights, beautiful appealing features.")),
-    # 膚色偏黃（2026-09-16 使用者看 klein-9B 出圖的回饋「太黃了」）：暖光、暖色調、warm glow 都會把皮膚往黃推，
-    # 所以白皙系除了改膚色句，也把風格句的暖光／暖色調換成中性或冷色日光。
-    "fair": dict(label="白皙", lead="Photorealistic portrait photograph",
-                 style_swaps=(("warm soft window light", "soft neutral daylight from a window"),
-                              ("muted warm palette", "clean neutral palette")),
-                 skin=("Fair, light skin in one single even tone with a soft rosy-neutral undertone, a fresh natural glow, "
-                       "a soft matte finish, bright clear eyes with crisp catchlights, beautiful appealing features.")),
-    "porcelain": dict(label="瓷白", lead="Photorealistic portrait photograph",
-                      style_swaps=(("warm soft window light", "soft cool daylight from a window"),
-                                   ("soft cinematic key light", "soft cool daylight"),
-                                   ("muted warm palette", "cool airy neutral palette")),
-                      skin=("Very fair porcelain-white skin in one single even tone with a cool pink undertone, a soft "
-                            "luminous finish, bright clear eyes with crisp catchlights, beautiful appealing features.")),
+    "cold_white": dict(
+        label="極致冷白皮（零偏黃·冷調透亮）★推薦",
+        lead="Photorealistic portrait photograph, clear cool daylight illumination",
+        style_swaps=(
+            ("warm soft window light", "soft cool daylight from a window"),
+            ("soft cinematic key light", "clean cool daylight key light"),
+            ("muted warm palette", "crisp cool neutral palette"),
+            ("warm morning sunlight", "clear bright morning daylight"),
+            ("soft warm highlights", "soft clean neutral highlights"),
+            ("golden hour sun-drenched beach lighting", "bright clear daylight coastal lighting"),
+            ("golden bokeh", "clean neutral bokeh"),
+            ("a healthy warm glow", "a luminous cool fair glow"),
+        ),
+        skin=("Extremely fair alabaster porcelain skin with delicate cool pink undertones, "
+              "a translucent luminous complexion, completely devoid of yellow tint or sallow undertone, "
+              "soft clean neutral-cool daylight, bright clear eyes with crisp catchlights, beautiful appealing features.")
+    ),
+    "rosy_white": dict(
+        label="櫻花粉白（白皙透粉·氣色紅潤）",
+        lead="Photorealistic portrait photograph, balanced neutral daylight",
+        style_swaps=(
+            ("warm soft window light", "soft neutral daylight from a window"),
+            ("soft cinematic key light", "soft diffused natural daylight"),
+            ("muted warm palette", "clean neutral palette with subtle rosy accents"),
+            ("warm morning sunlight", "soft fresh morning daylight"),
+            ("soft warm highlights", "soft rosy-white highlights"),
+            ("golden bokeh", "neutral bokeh"),
+            ("a healthy warm glow", "a fresh vibrant rosy glow"),
+        ),
+        skin=("Very fair porcelain skin with a soft delicate rosy-pink flush on the cheeks and lips, "
+              "a vibrant healthy fair complexion, smooth translucent texture with a radiant glow, "
+              "clean diffused daylight, bright clear eyes with crisp catchlights, beautiful appealing features.")
+    ),
+    "fair": dict(
+        label="自然白皙（純淨透亮·中性調）",
+        lead="Photorealistic portrait photograph, clean natural daylight",
+        style_swaps=(
+            ("warm soft window light", "soft neutral daylight from a window"),
+            ("soft cinematic key light", "soft natural daylight"),
+            ("muted warm palette", "clean neutral palette"),
+            ("warm morning sunlight", "soft morning daylight"),
+            ("soft warm highlights", "soft natural highlights"),
+            ("golden bokeh", "neutral bokeh"),
+            ("a healthy warm glow", "a clean natural glow"),
+        ),
+        skin=("Fair, light skin in one single even clean tone with neutral undertones, "
+              "a fresh natural glow, smooth texture, soft clean daylight, "
+              "bright clear eyes with crisp catchlights, beautiful appealing features.")
+    ),
+    "porcelain": dict(
+        label="柔焦瓷白（古典純白·高級無瑕）",
+        lead="Photorealistic high-end beauty portrait, professionally retouched",
+        style_swaps=(
+            ("warm soft window light", "soft cool daylight from a window"),
+            ("soft cinematic key light", "soft diffused studio key light"),
+            ("muted warm palette", "clean ivory-neutral palette"),
+            ("warm morning sunlight", "clear bright morning light"),
+            ("soft warm highlights", "soft ivory highlights"),
+            ("golden bokeh", "neutral bokeh"),
+        ),
+        skin=("Flawless porcelain-white skin with smooth satin finish, perfectly even tone, "
+              "soft diffused studio lighting, bright clear eyes with crisp catchlights, beautiful appealing features.")
+    ),
+    "warm_ivory": dict(
+        label="暖白象牙（溫潤柔和·奶油肌）",
+        lead="Photorealistic portrait photograph, soft flattering illumination",
+        style_swaps=(),
+        skin=("Fair creamy ivory skin with a delicate satin glow and soft smooth finish, "
+              "gentle flattering light, even ivory complexion, bright clear eyes with crisp catchlights, "
+              "beautiful appealing features.")
+    ),
+    "natural": dict(
+        label="原生自然（真實膚質·微暖細節）",
+        lead="Photorealistic portrait photograph, natural skin texture",
+        style_swaps=(),
+        skin=SKIN
+    ),
+    "clean": dict(
+        label="乾淨膚質（商用棚拍標準）",
+        lead="Photorealistic portrait photograph",
+        style_swaps=(),
+        skin=SKIN
+    ),
+    "sun_kissed": dict(
+        label="陽光小麥（健康蜜糖·微古銅光澤）",
+        lead="Photorealistic outdoor portrait photograph",
+        style_swaps=(),
+        skin=("Smooth healthy sun-kissed golden honey skin with a radiant sunlit sheen, "
+              "athletic natural glow, warm golden outdoor lighting, bright clear eyes with crisp catchlights, "
+              "beautiful appealing features.")
+    ),
 }
 QUALITY_NEGATIVE = "blurry, low quality, deformed face, deformed hands, extra fingers, watermark, text"
 PAINT_NEGATIVE = "painting, oil painting, illustration, drawing, cartoon, anime, 3d render, cgi, plastic skin"
 
 
-def build_prompt(v, photo=False, skin="clean", bust="default", face="default", pose="default", ref=False,
+def build_prompt(v, photo=False, skin="cold_white", bust="default", face="default", pose="default", ref=False,
                  framing="default"):
     # LESSONS §1 的段落順序：風格 → 服裝 → 髮型 → 身形 → 身分 → 臉 → 神情 → 膚質
-    preset = SKIN_PRESETS[skin]
+    preset = SKIN_PRESETS.get(skin, SKIN_PRESETS["cold_white"])
     fp = FACE_PRESETS[face]
     is_male = (v.get("gender") == "male") or (fp.get("gender") == "male")
 
@@ -323,11 +422,15 @@ def build_prompt(v, photo=False, skin="clean", bust="default", face="default", p
     bust_clause = "" if is_male else BUST_PRESETS[bust]
 
     if ref:
-        ref_lead = "A photo of the exact same person as shown in image 1, identical face and hair. "
-        ref_tail = ("Keep face shape, eyes, eyebrows, nose, mouth, hair colour, hairstyle, skin tone and age "
-                    "completely identical to image 1. Natural candid pose, real camera photo, natural lighting, sharp focus.")
+        n = ref if (isinstance(ref, int) and ref > 1) else 1
+        refs_str = "image 1" if n == 1 else ("images " + ", ".join(str(i) for i in range(1, n)) + f" and {n}")
+        ref_lead = f"A photo of the exact same person as shown in {refs_str}, identical face and hair. "
+        ref_tail = (f"Keep facial features, facial contours, eyes, eyebrows, nose, mouth, hair colour, hairstyle "
+                    f"and facial likeness completely identical to {refs_str}. Natural candid pose, real camera photo, "
+                    f"sharp focus.")
+        skin_clause = f"Her skin tone and complexion is: {preset['skin']} "
         return (ref_lead + (fp.get("ethnic") or "") + style + clothing + body + bust_clause
-                + v["extra"] + ref_tail)
+                + skin_clause + v["extra"] + ref_tail)
 
     if is_male:
         hair_clause = fp["hair"] or "His dark hair is cleanly cut and neatly groomed, short on the sides. "
