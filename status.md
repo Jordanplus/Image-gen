@@ -19,6 +19,12 @@
   - GUI 介面保持膚色下拉選單可用並支援自由覆蓋。
 - **介面新增「🛑 關閉伺服器」功能**：
   - 介面右上角新增關閉按鈕，點擊二度確認後向後端 `/api/shutdown` 發送請求，安全終止背景 Python 服務並完整釋放 Apple Silicon 統一記憶體。
+- **姿勢解剖結構優化與全新姿勢擴充**：
+  - **修復坐木凳（`stool`）腿部畸變**：原 `legs crossed at the knee` 易造成 2D 擴散重疊與多肢錯誤，重構為「優雅斜並腿」經典寫真坐姿（雙腿併攏側斜自然下垂放地面），雙腿解剖清晰無畸變。
+  - **新增「往前傾趴臥（`prone_forward`）」**：上身手肘支撐向前傾、弓背挺胸直視鏡頭。
+  - **新增「趴在前方透明玻璃上（`glass_press`）」**：雙手手掌與胸口貼緊鏡頭前方透明玻璃，帶有清透倒影與微貼壓高光。
+  - **新增「跪姿前傾（`kneel_lean`）」**：跪地雙手前撐、弓腰前俯視角。
+  - 負面詞補強 `deformed limbs, deformed legs, extra legs, extra limbs, bad anatomy` 防護。
 - **ComfyUI 獨立環境準備**：
   - 建立 Python 3.11 MPS 虛擬環境 (`venv`)，配置 `ComfyUI_PuLID_Flux_ll` 與 `ComfyUI-GGUF`。
 

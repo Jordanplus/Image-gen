@@ -222,13 +222,16 @@ POSE_PRESETS = {
     "back": dict(label="背對回眸", text="She stands with her back to the camera, looking back over one shoulder. "),
     "hair": dict(label="雙手撩髮", text="She stands with both arms raised, hands gathering her hair above her head, elbows out. "),
     "profile": dict(label="側身站立", text="She stands in profile, one hip pushed out, arms relaxed at her sides. "),
-    "stool": dict(label="坐木凳", text="She sits on a low wooden stool, legs crossed at the knee, leaning slightly forward. "),
+    "stool": dict(label="坐木凳（優雅斜並腿）", text="She sits upright on a low wooden stool with graceful posture, knees together, both legs kept cleanly together and angled gently to one side, both feet resting naturally on the floor with anatomically correct legs and feet. "),
+    "prone_forward": dict(label="往前傾趴臥（手肘支撐）", text="She is lying prone on her stomach, upper body propped up on her elbows and leaning forward toward the camera, chest lifted, looking directly into the lens with an arched back, legs resting naturally behind her. "),
+    "glass_press": dict(label="趴在前方透明玻璃上", text="She leans forward pressed against a large clear transparent glass pane directly in front of the camera, both open hands and palms flattened against the smooth glass surface, chest and torso gently pressed against the clear glass pane, gazing directly through the glass at the viewer, subtle clean reflections on the transparent glass. "),
+    "kneel_lean": dict(label="跪姿前傾（手撐地）", text="She is on her knees leaning forward with both hands on the floor supporting her weight, back gently arched, chest low, gazing up at the camera. "),
     "floor": dict(label="地板側坐", text="She sits on the floor with her legs folded to one side, one hand on the floor behind her. "),
     "kneel": dict(label="跪坐", text="She kneels upright on the floor, back straight, hands resting on her thighs. "),
     "wall": dict(label="靠牆", text="She leans back against a plain wall, one foot flat against it, head tilted back slightly. "),
     "side": dict(label="側躺", text="She lies on her side on a low bed, head propped on one hand, legs slightly bent. "),
     "supine": dict(label="仰躺", text="She lies on her back on a low bed, knees bent, both arms stretched above her head. "),
-    "prone": dict(label="趴臥", text="She lies face down on a low bed, propped up on her forearms, ankles crossed in the air. "),
+    "prone": dict(label="趴臥（平趴放鬆）", text="She lies face down on a low bed, propped up on her forearms, ankles crossed in the air. "),
     "stretch": dict(label="踮腳伸展", text="She stands on tiptoe, arms stretched high above her head, back gently arched. "),
 }
 # 長相類型（不綁定任何真人，只用五官描述）。ethnic＝族裔短句：prompt 不寫族裔時 klein 一律畫歐美臉
@@ -392,7 +395,7 @@ SKIN_PRESETS = {
               "beautiful appealing features.")
     ),
 }
-QUALITY_NEGATIVE = "blurry, low quality, deformed face, deformed hands, extra fingers, watermark, text"
+QUALITY_NEGATIVE = "blurry, low quality, deformed limbs, deformed legs, extra legs, extra limbs, bad anatomy, deformed face, deformed hands, extra fingers, watermark, text"
 PAINT_NEGATIVE = "painting, oil painting, illustration, drawing, cartoon, anime, 3d render, cgi, plastic skin"
 
 
@@ -417,7 +420,7 @@ def build_prompt(v, photo=False, skin="cold_white", bust="default", face="defaul
         body = _drop_leg_clauses(body)
         style = style.replace(" across her bare shoulders and legs", " across her bare shoulders")
     if pose != "default":
-        body = re.sub(r"(She stands with her weight on one leg|He stands with hands casually resting near his suit pockets|He stands comfortably)[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
+        body = re.sub(r"(She stands with her weight on one leg|She stands relaxed against a gentle ocean breeze|He stands with hands casually resting near his suit pockets|He stands comfortably)[^.]*\.\s*", "", body) + POSE_PRESETS[pose]["text"]
 
     bust_clause = "" if is_male else BUST_PRESETS[bust]
 
