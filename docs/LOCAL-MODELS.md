@@ -22,6 +22,55 @@
 
 ---
 
+## 🖥️ 跨架構模型選擇與硬體支援指南（24GB vs 32GB 統一記憶體）
+
+本專案集成了兩大算圖體系：**ComfyUI**（PyTorch MPS，主攻 IP-Adapter / FaceDetailer 硬鎖臉與 4K/8K 超高解析解碼）與 **mflux**（Apple Silicon MLX 原生，主攻 FLUX.2、Z-Image、Qwen 與 SeedVR2 快速生圖與放大）。不同模型對統一記憶體需求與崩潰臨界點差異極大：
+
+### 1. 全模型能力與硬體支援速查表
+
+| 模型名稱 / Key | 後端架構 | 授權／商用 | 核心能力與特色 | 24GB 適用性 (Mac mini M4) | 32GB 適用性 (MacBook Pro M5) | 建議腳本 / 工作流 |
+|---|---|---|---|---|---|---|
+| **Juggernaut XL v9 Lightning** | ComfyUI | 創作免授權 | **現役寫實主模型**。皮膚紋理與毛孔細緻，配合 IP-Adapter plus-face / FaceDetailer 達成 100% 臉部還原與多姿勢一致性。 | ✅ **穩跑**（單張 70–100s；連續批次必須每張 unload model，長批次用 VAEDecodeTiled 防 OOM） | 🚀 **充裕順跑**（支援更大批次與更高解析） | `scripts/my_imagen_v2.py`<br>`workflows/workflow_api_face_fix.json` |
+| **FLUX.2-klein-4B** (`klein-4b`) | mflux | Apache-2.0 (✅商用) | **遊戲立繪主力**。6 步蒸餾版，每張 62 秒；年齡變化敏感（19→35 歲明顯變老）、無斑點、提示詞遵循佳。不吃負面提示詞。 | ✅ **推薦首選**（記憶體負擔極低，可用空間 >70%） | 🚀 **極速秒出** | `recipes/commercial/ab_character_cfg.py`<br>`recipes/commercial/portrait_style_probe.py` |
+| **FLUX.2-klein-base-4B** (`klein-base-4b`) | mflux | Apache-2.0 (✅商用) | 50 步非蒸餾版（需 CFG），偏手繪藝術風（painted 風格），年齡不易改動，單張較慢（約 16.6 分鐘）。 | ✅ **可跑**（但速度慢，本機權重已刪、未預抓） | 🚀 **充裕** | `recipes/local_models.py` |
+| **FLUX.2-klein-9B** (`klein-9b`) | mflux | FLUX NC v2.1 (❌個人) | **照片修圖／旅遊合成主力**。4–6 步蒸餾，真實照片感極高，多圖參考臉部替換與局部修復。支援掛載 LoRA / LoKr。 | ⚠️ **需降規使用**（尺寸限 768，必掛 `MemorySaver` 與 `--low-ram`；開 1024 或忘掛 MemorySaver 會直接被系統 kill） | ✅ **推薦配備**（可順跑 1024 解析度與 LoRA，免吃大量 swap） | `recipes/personal/retouch_face.py`<br>`recipes/personal/travel_with_me.py` |
+| **FLUX.1-schnell GGUF + PuLID** | ComfyUI | Apache-2.0 (✅商用) | FLUX 4 步出圖 + PuLID 臉部特徵鎖定。速度約 70–100s。 | ✅ **穩跑**（Q4+T5 量化約佔 12–14GB） | 🚀 **充裕** | `workflows/legacy/` / ComfyUI API |
+| **Z-Image-Turbo 官方版** (`z-image-turbo`) | mflux | Apache-2.0 (✅商用) | 9 步蒸餾，照片感強。但官方權重為 **F32（31GB）**。 | ❌ **不可用（必爆）**<br>載入後生到第 2 步即被系統因記憶體不足 SIGKILL 強制殺死。 | ⚠️ **需 32GB+**（吃滿記憶體） | `recipes/z_image_resident.py` |
+| **Z-Image-Turbo 4-bit** (`z-image-turbo-q4`) | mflux | 轉檔者標 Qwen (先歸個人) | 社群 4-bit 量化版（5.9GB），768×1152 每張約 173 秒，寫實感強。換 seed 姿勢與臉變化小，近拍需壓雀斑。 | ✅ **穩跑**（峰值僅 6.4GB，可用記憶體 >80%） | 🚀 **充裕** | `recipes/local_models.py` |
+| **Z-Image Base** (`z-image`) | mflux | Apache-2.0 (✅商用) | 50 步非蒸餾版，柔和繪畫風。但單張需約 31 分鐘且服裝易偏離 prompt。 | ✅ **可跑**（但極慢，本機權重已刪） | 🚀 **充裕** | `recipes/z_image_resident.py` |
+| **Qwen-Image-2512-4bit** (`qwen-image-2512`) | mflux | Apache-2.0 (✅商用) | 20B+7B VLM，自然風景、動物寫實極強；人文歷史/古代建築易強制畫成油畫。 | ⚠️ **強烈不建議**（模型即佔 24GB，記憶體吃緊每步高達 83 秒甚至當機中斷） | ✅ **可用**（約 270–340 秒/張） | `recipes/gen_photo_v2.py`<br>`recipes/site_art_resident.py` |
+| **SeedVR2-3B** (`seedvr2-3b`) | mflux | Apache-2.0 (✅商用) | **專用細節放大模型**。比一般插值大幅補強睫毛、虹膜、毛孔細節。需套用專案內 MLX repeat 相容修補。 | ⚠️ **有限制使用**（1024→1536 峰值達 **18GB**！短邊解析度上限 ≤1536，且**絕不可與生圖模型同時跑**） | 🚀 **充裕**（可放寬放大尺寸） | `recipes/personal/retouch_face.py` |
+
+---
+
+### 2. 24GB 統一記憶體（Mac mini M4）實戰操作準則
+
+24GB 機器在跑當前主流模型時，VRAM 與系統記憶體共享，處於「標準模型很順、大模型踩邊緣」的關鍵分水嶺，**必須遵循以下規則**：
+
+1. **立繪首選 `klein-4b`**：6 步完成，每張約 1 分鐘，記憶體佔用極低且穩定，是 24GB 產出最可靠的商用選擇。
+2. **`klein-9b` 必須降解析度並加裝記憶體保護**：
+   - ⚠️ **禁區**：以 1024 輸出＋1024 參考圖編輯且未掛 `MemorySaver`，執行到第 2 步會觸發系統 OOM 崩潰。
+   - ✅ **解法**：輸出尺寸降至 768（如 768×1120 或 704×1216），呼叫 `local_models.load(..., single_run=True, low_ram=True)` 掛上 `MemorySaver`（文字編碼完成立即移出記憶體，節省 8–12GB）。執行時可用記憶體約剩 14–18%，swap 約 9GB，可順利跑完（每步約 49 秒）。
+3. **Z-Image-Turbo 務必切換到 4-bit 量化版 (`z-image-turbo-q4`)**：
+   - 官方 F32（31GB）在 24GB 上**必定崩潰**，切勿嘗試。使用 4-bit 預量化版峰值僅 6.4GB。
+4. **SeedVR2 放大模型「必須單獨跑」且「短邊 ≤1536」**：
+   - SeedVR2-3B 在 1024→1536 時峰值記憶體高達 **18GB**。若記憶體中已有生圖模型殘留，必爆 OOM。請確保「生圖完成 → 釋放/結束進程 → 啟動放大腳本」。
+   - `resolution` 參數為短邊（`min(w, h)`），直式圖切勿直覺給 1536 長邊（否則會放大至 1536×2654 造成記憶體過載）。
+5. **ComfyUI 連續跑圖防爆機制**：
+   - 單張生成不會 OOM，但**連續批次會累積 MPS 顯存殘留**。
+   - 必須於每張生成間呼叫 `POST /free {"free_memory":true,"unload_models":true}`。若解析度超過 1536×2240，VAE 解碼必須改用 `VAEDecodeTiled`（6 參數全填）。
+
+---
+
+### 3. 32GB 統一記憶體（MacBook Pro M5）的解放優勢
+
+在 32GB 設備上：
+1. **FLUX.2-klein-9B 可全速發揮**：可直接以 1024×1024 原生解析度進行生成、多圖參考圖修復，並外掛 LoRA / LyCORIS LoKr，幾乎不觸發系統大量 swap，每步速度顯著提升。
+2. **可承載 Qwen-Image-2512-4bit**：約 24GB 的權重載入後，仍有 8GB 空間供推論暫存，不會引發每步 83 秒的換頁卡頓。
+3. **SeedVR2 放大餘裕倍增**：可承接更高解析度的超解析放大，且與前後處理管道的銜接更穩定。
+
+---
+
 ## 兩組用途：商用（自製遊戲）／個人（旅遊生圖、修照片）
 
 > **規則：商用只准可商用授權的模型。** `recipes/local_models.py` 的 `require(key, "commercial")`

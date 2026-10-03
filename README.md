@@ -1,12 +1,35 @@
 # Mac M-Series 本地端 AI 圖片創作站 CLI 終極專業版
 
-這是一套專為 Mac M 系列晶片 (32GB+ 統一記憶體) 深度優化的本地端 AI 圖片創作站。集成了 **Juggernaut XL 寫實模型**、**核彈級臉部修復 (FaceID / IP-Adapter)**，**並以 VAEDecodeTiled 分塊解碼突破單次 VAE 解碼的 VRAM 上限，本地即可產出 4K / 8K 超高解析度影像（單張內零接縫）。**
+這是一套專為 Apple Silicon Mac（深度優化 24GB 與 32GB+ 統一記憶體）打造的本地端 AI 圖片創作站。集成了 **Juggernaut XL 寫實模型**、**核彈級臉部修復 (FaceID / IP-Adapter)**，**並以 VAEDecodeTiled 分塊解碼突破單次 VAE 解碼的 VRAM 上限，本地即可產出 4K / 8K 超高解析度影像（單張內零接縫）。**
 
+> 🤖 **本地模型有哪些？各模型特色與 24GB / 32GB 適用性詳見下方速查表，完整深度評測見 [`docs/LOCAL-MODELS.md`](docs/LOCAL-MODELS.md)。**
+>
 > 📋 **生圖方法選用（純 prompt / IP-Adapter 鎖臉 / FLUX+PuLID）與本地操作指南見 [`docs/METHODS.md`](docs/METHODS.md)。**
 >
 > 🧰 **工具鏈、模型、安裝下載與踩雷規避見 [`toolchain.md`](toolchain.md)。**
-
+>
 > 📁 **本專案目錄結構見下方「專案結構」一節；2026-06-26 完成一次目錄重排，腳本/workflow/prompt/文件已分類歸位（細節見 [`status.md`](status.md)）。**
+
+---
+
+## 🤖 本地模型選擇與硬體支援（24GB vs 32GB）
+
+專案支援兩大後端架構：**ComfyUI**（寫實人像、IP-Adapter 鎖臉、4K/8K 分塊解碼）與 **mflux**（Apple Silicon MLX 原生：FLUX.2、Z-Image、Qwen、SeedVR2 放大）。請依硬體配置與任務情境挑選：
+
+| 模型名稱 / Key | 後端架構 | 授權／用途 | 核心能力與特色 | 24GB (Mac mini M4) | 32GB (MacBook Pro M5) |
+|---|---|---|---|---|---|
+| **Juggernaut XL v9 Lightning** | ComfyUI | 創作免授權 | **寫實主模型**。毛孔皮膚質感頂級，配合 IP-Adapter plus-face / FaceDetailer 達成 100% 臉部還原與多姿勢一致。 | ✅ **穩跑**<br>（批次需每張 unload；大圖需 Tiled） | 🚀 **充裕順跑** |
+| **FLUX.2-klein-4B** (`klein-4b`) | mflux | Apache-2.0 (商用) | **遊戲立繪主力**。6 步蒸餾，~62s/張；年齡變化敏感（19→35 歲明顯變老）、無斑點、提示詞遵循度高。 | ✅ **推薦首選**<br>（負擔極輕、速度快） | 🚀 **極速秒出** |
+| **FLUX.2-klein-9B** (`klein-9b`) | mflux | 非商用（個人） | **照片修圖／旅遊合成主力**。4 步蒸餾，照片感天花板，支援多圖參考修臉與 LoRA/LoKr。 | ⚠️ **需降規使用**<br>（限 768 寬、必掛 MemorySaver，swap ~9GB） | ✅ **推薦配備**<br>（可順跑 1024 與 LoRA） |
+| **FLUX.1-schnell GGUF + PuLID** | ComfyUI | Apache-2.0 (商用) | FLUX 4 步出圖 + PuLID 臉部特徵鎖定。約 70–100s。 | ✅ **穩跑** (~12-14GB) | 🚀 **充裕** |
+| **Z-Image-Turbo 4-bit** (`z-image-turbo-q4`) | mflux | 個人（標籤爭議） | 寫實照片感強，~173s/張，細節豐富；換 seed 姿勢差異小。 | ✅ **穩跑** (峰值僅 6.4GB) | 🚀 **充裕** |
+| **Z-Image-Turbo 官方版** (`z-image-turbo`) | mflux | Apache-2.0 (商用) | 9 步蒸餾寫實。但官方權重為 **F32（31GB）**。 | ❌ **不可用**<br>（第 2 步記憶體不足被系統強制 kill） | ⚠️ **需 32GB+** |
+| **Qwen-Image-2512-4bit** (`qwen-image-2512`) | mflux | Apache-2.0 (商用) | 20B+7B VLM，自然風景/動物極強，歷史建築易偏油畫。 | ⚠️ **強烈不建議**<br>（24GB 滿載，每步飆至 83 秒） | ✅ **可用** |
+| **SeedVR2-3B** (`seedvr2-3b`) | mflux | Apache-2.0 (商用) | **專用細節放大模型**。比一般拉伸大幅補強睫毛/虹膜/毛孔細節。 | ⚠️ **有限制使用**<br>（單獨跑，短邊 ≤1536，峰值 18GB） | 🚀 **充裕** |
+
+> 📖 **完整模型實測數據、參數配方、MemorySaver 掛載與避坑手冊，請見專題文件：[`docs/LOCAL-MODELS.md`](docs/LOCAL-MODELS.md)。**
+> 
+> 🎯 **ComfyUI 鎖臉工作流與連續批次防爆 VRAM 機制（VAEDecodeTiled / unload_models）見 [`docs/METHODS.md`](docs/METHODS.md)。**
 
 ---
 
@@ -21,7 +44,7 @@ image-gen/
 ├─ recipes/         獨立生成腳本（flux2_resident、gen_photo_v2、transform_v3…）
 ├─ cloud/           ☁️ 線上備援路線（apipass.dev：GPT-image-2.5 / Nano Banana，見 cloud/README.md）
 ├─ docs/            文件（METHODS / LOCAL-MODELS）
-├─ README.md  toolchain.md  plan.md  status.md
+├─ README.md  toolchain.md  plan.md  status.md  update-plan.md
 ├─ setup.sh  start_backend.sh  download_model.sh
 │
 │  ── 以下保留在本機、未進版控（見 .gitignore）──
