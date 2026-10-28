@@ -10,7 +10,8 @@ VAEDecodeTiled 分塊解碼在本地產出 4K / 8K 影像。
   `workflows/workflow_api_face_fix.json`）；`scripts/legacy/` 為舊版存查。
 - `recipes/`：獨立生成腳本（mflux / FLUX.2 / Qwen-Image / Z-Image 等）。
 - `cloud/`：線上備援路線（apipass.dev：GPT-image-2.5 / Nano Banana），
-  含 `server.py`、`apipass_gen.py`、手機 App，見 `cloud/README.md`。
+  含 `server.py`、`apipass_gen.py`、手機 App，見 `cloud/README.md`；
+  apipass 可選模型清單（單價、API ID、依用途挑）見 `cloud/APIPASS-MODELS.md`。
 - `runners/`、`prompts/`、`refs/`、`outputs/`、`models/`、`ComfyUI/`、`venv/`：
   僅存本機、未進版控（見 `.gitignore`）。
 

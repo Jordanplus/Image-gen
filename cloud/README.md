@@ -40,6 +40,8 @@ python cloud/generate_image.py -b openai -p "the same person, photorealistic por
 python cloud/generate_image.py -b apipass --apipass-model flux/flux-pro-image-2 -p "..." -o out.png
 ```
 
+> 📋 **可選模型清單**（19 個圖像模型、單價、API ID 規則、依用途挑、各模型參考圖欄位差異）：[`APIPASS-MODELS.md`](APIPASS-MODELS.md)
+
 A/B 對照（同 prompt 兩後端並排）：
 
 ```bash
